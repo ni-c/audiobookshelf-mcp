@@ -82,6 +82,8 @@ features:
 <figcaption>The server holds one Audiobookshelf API key and speaks stdio — it never listens on a port.</figcaption>
 </figure>
 
+![Terminal recording: the server reports 44 tools, lists library items as a compact projection, and answers the first delete_collection call with a single-use confirmation token instead of deleting anything](/demo.gif)
+
 ## In one command
 
 ```sh

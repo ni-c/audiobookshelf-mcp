@@ -20,6 +20,8 @@ keep your listening progress, bookmarks, collections and playlists up to date.
 
 <img src="https://audiobookshelf-mcp.ni-c.de/architecture.svg" alt="An MCP client talks to audiobookshelf-mcp over stdio; the server exposes 29 read and 15 write tools, compacts every response, and calls the Audiobookshelf REST API over HTTPS with a bearer API key" width="800">
 
+<img src="https://audiobookshelf-mcp.ni-c.de/demo.gif" alt="Terminal recording: the server reports 44 tools, lists library items as a compact projection, and answers the first delete_collection call with a single-use confirmation token instead of deleting anything" width="800">
+
 ## Requirements
 
 - Node.js 22 or newer
