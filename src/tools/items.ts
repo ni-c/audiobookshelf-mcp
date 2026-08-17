@@ -146,7 +146,8 @@ export function registerItemReadTools(
         )) as Record<string, unknown>;
         const episodes = Array.isArray(data.episodes) ? data.episodes : [];
         return untrustedJsonResult({
-          total: data.total,
+          // This endpoint reports no total, only the page it returned.
+          numReturned: episodes.length,
           limit: data.limit,
           page: data.page,
           episodes:

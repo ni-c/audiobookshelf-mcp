@@ -276,7 +276,7 @@ export function registerLibraryReadTools(
             const hit = entry as Record<string, unknown>;
             return compactSeries(hit.series ?? hit);
           }),
-          authors: wrapped('authors').map(compactAuthor),
+          authors: wrapped('authors').map((a) => compactAuthor(a)),
           narrators: wrapped('narrators'),
           tags: wrapped('tags'),
         });
@@ -370,7 +370,10 @@ export function registerLibraryReadTools(
           total: data.total,
           page: data.page,
           limit: data.limit,
-          results: detail === 'full' ? results : results.map(compactSeries),
+          // Without includeBooks: the endpoint embeds every book of every series,
+          // which dwarfs the series data itself.
+          results:
+            detail === 'full' ? results : results.map((s) => compactSeries(s)),
         });
       })
   );
@@ -379,7 +382,10 @@ export function registerLibraryReadTools(
     'get_series',
     {
       title: 'Get series',
-      description: 'Fetches a single series by id.',
+      description:
+        'Fetches a single series by id, including its books. To list the books ' +
+        'with paging and sorting, use list_library_items with ' +
+        'filter_group="series" instead.',
       inputSchema: {
         series_id: z.string().min(1).describe('Series id'),
         detail: detailParam,
@@ -392,7 +398,7 @@ export function registerLibraryReadTools(
           `/api/series/${assertPathSegment(series_id, 'series_id')}`
         );
         return untrustedJsonResult(
-          detail === 'full' ? data : compactSeries(data)
+          detail === 'full' ? data : compactSeries(data, { includeBooks: true })
         );
       })
   );
@@ -421,7 +427,8 @@ export function registerLibraryReadTools(
         );
         return untrustedJsonResult({
           numAuthors: authors.length,
-          authors: detail === 'full' ? authors : authors.map(compactAuthor),
+          authors:
+            detail === 'full' ? authors : authors.map((a) => compactAuthor(a)),
         });
       })
   );
@@ -461,7 +468,9 @@ export function registerLibraryReadTools(
             })
         );
         return untrustedJsonResult(
-          detail === 'full' ? data : compactAuthor(data)
+          detail === 'full'
+            ? data
+            : compactAuthor(data, { includeDescription: true })
         );
       })
   );

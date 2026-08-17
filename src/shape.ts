@@ -263,6 +263,13 @@ export function compactLibraryItem(
       progress === undefined || progress === null
         ? undefined
         : compactMediaProgress(progress),
+    // `/api/me/items-in-progress` carries no progress object, only the timestamp
+    // of the last update — and for podcasts the episode that was in progress.
+    progressLastUpdate: num(item.progressLastUpdate),
+    recentEpisode:
+      item.recentEpisode === undefined || item.recentEpisode === null
+        ? undefined
+        : compactPodcastEpisode(item.recentEpisode),
     description: options.includeDescription
       ? truncateText(metadata.description)
       : undefined,
@@ -298,7 +305,15 @@ export function compactPodcastEpisode(
   });
 }
 
-export function compactSeries(value: unknown): Record<string, unknown> {
+/**
+ * `includeBooks` is off for lists on purpose: the series endpoint embeds the full
+ * book of every entry even when minified, which makes a page of ten series an
+ * order of magnitude larger than the series data itself.
+ */
+export function compactSeries(
+  value: unknown,
+  options: { includeBooks?: boolean } = {}
+): Record<string, unknown> {
   const series = rec(value);
   const books = arr(series.books);
   return defined({
@@ -309,11 +324,71 @@ export function compactSeries(value: unknown): Record<string, unknown> {
     totalDurationSeconds: num(series.totalDuration),
     addedAt: num(series.addedAt),
     books:
-      books.length > 0 ? books.map((b) => compactLibraryItem(b)) : undefined,
+      options.includeBooks === true && books.length > 0
+        ? books.map((b) => compactLibraryItem(b))
+        : undefined,
   });
 }
 
-export function compactAuthor(value: unknown): Record<string, unknown> {
+/** Days of listening history kept in the projection of the stats endpoint. */
+const RECENT_DAYS = 30;
+/** Items reported in the projection of the stats endpoint. */
+const TOP_ITEMS = 10;
+
+/**
+ * `/api/me/listening-stats` is the largest response of the whole API: it embeds
+ * the complete media metadata of every item ever listened to, the totals of every
+ * calendar day since the account exists, and ten full session objects. On a
+ * three-year-old instance that is ~95 kB. The projection keeps the totals, the
+ * last 30 days and the top items.
+ */
+export function compactListeningStats(value: unknown): Record<string, unknown> {
+  const stats = rec(value);
+  const days = rec(stats.days);
+  const items = rec(stats.items);
+
+  const dayEntries = Object.entries(days)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    .sort(([a], [b]) => b.localeCompare(a));
+
+  const topItems = Object.values(items)
+    .map((entry) => {
+      const item = rec(entry);
+      return {
+        id: str(item.id),
+        title: str(rec(item.mediaMetadata).title),
+        timeListeningSeconds: num(item.timeListening) ?? 0,
+      };
+    })
+    .sort((a, b) => b.timeListeningSeconds - a.timeListeningSeconds)
+    .slice(0, TOP_ITEMS);
+
+  return defined({
+    totalTimeSeconds: num(stats.totalTime),
+    todaySeconds: num(stats.today),
+    dayOfWeekSeconds: stats.dayOfWeek,
+    numDaysWithListening: dayEntries.length,
+    numItemsListened: Object.keys(items).length,
+    recentDaysSeconds: Object.fromEntries(dayEntries.slice(0, RECENT_DAYS)),
+    topItems,
+    // The endpoint also embeds ten full session objects. They are left out here:
+    // list_listening_sessions returns the same data, paginated and shaped.
+    numRecentSessions: arr(stats.recentSessions).length,
+    note:
+      dayEntries.length > RECENT_DAYS
+        ? `Only the last ${RECENT_DAYS} of ${dayEntries.length} days with listening are shown — call with detail="full" for the complete history. Recent sessions are available from list_listening_sessions.`
+        : undefined,
+  });
+}
+
+/**
+ * `includeDescription` is off for lists: an author biography runs to hundreds of
+ * words, and a library with 25 authors would spend most of the response on them.
+ */
+export function compactAuthor(
+  value: unknown,
+  options: CompactItemOptions = {}
+): Record<string, unknown> {
   const author = rec(value);
   const items = arr(author.libraryItems);
   return defined({
@@ -322,7 +397,9 @@ export function compactAuthor(value: unknown): Record<string, unknown> {
     asin: str(author.asin),
     numBooks: num(author.numBooks) ?? (items.length || undefined),
     addedAt: num(author.addedAt),
-    description: truncateText(author.description),
+    description: options.includeDescription
+      ? truncateText(author.description)
+      : undefined,
     libraryItems:
       items.length > 0 ? items.map((i) => compactLibraryItem(i)) : undefined,
   });

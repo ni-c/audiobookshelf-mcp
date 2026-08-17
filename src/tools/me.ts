@@ -14,6 +14,7 @@ import {
   compactBookmark,
   compactLibraryItem,
   compactListeningSession,
+  compactListeningStats,
   compactMediaProgress,
   compactUser,
   listFrom,
@@ -53,7 +54,9 @@ export function registerMeReadTools(
       title: 'List items in progress',
       description:
         'The items the user has started but not finished, newest first — the ' +
-        '"Continue Listening" list across all libraries.',
+        '"Continue Listening" list across all libraries. The entries carry ' +
+        'progressLastUpdate but not the position itself; use get_media_progress ' +
+        'for that. For podcasts, recentEpisode names the episode in progress.',
       inputSchema: {
         limit: limitParam(25),
         detail: detailParam,
@@ -113,14 +116,22 @@ export function registerMeReadTools(
       title: 'Get listening stats',
       description:
         'Aggregated listening statistics of the current user: total time, time ' +
-        'per day, time per weekday and the most listened items.',
-      inputSchema: {},
+        'per weekday, the last 30 days, the ten most listened items and the ten ' +
+        'most recent sessions. detail="full" returns the complete per-day history ' +
+        'and the full metadata of every item ever listened to, which is the ' +
+        'largest response this API produces.',
+      inputSchema: {
+        detail: detailParam,
+      },
       annotations: { readOnlyHint: true },
     },
-    async () =>
-      run(async () =>
-        untrustedJsonResult(await api.get('/api/me/listening-stats'))
-      )
+    async ({ detail }) =>
+      run(async () => {
+        const data = await api.get('/api/me/listening-stats');
+        return untrustedJsonResult(
+          detail === 'full' ? data : compactListeningStats(data)
+        );
+      })
   );
 
   server.registerTool(

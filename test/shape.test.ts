@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compactAuthor,
   compactLibraryItem,
+  compactListeningStats,
   compactMediaProgress,
   compactPlaylist,
+  compactSeries,
   compactUser,
   listFrom,
   truncateText,
@@ -173,6 +176,117 @@ describe('compactPlaylist', () => {
     });
     expect(shaped.numItems).toBe(1);
     expect(JSON.stringify(shaped)).not.toContain('part1.m4b');
+  });
+});
+
+describe('compactSeries', () => {
+  it('omits the embedded books unless asked for', () => {
+    const series = { id: 'ser_1', name: 'Ozean', books: [expandedBook] };
+    expect(compactSeries(series)).toMatchObject({
+      id: 'ser_1',
+      name: 'Ozean',
+      numBooks: 1,
+    });
+    expect(compactSeries(series)).not.toHaveProperty('books');
+    expect(compactSeries(series, { includeBooks: true })).toHaveProperty(
+      'books'
+    );
+  });
+
+  it('counts via libraryItemIds when no books are embedded', () => {
+    expect(
+      compactSeries({ id: 's', libraryItemIds: ['a', 'b', 'c'] }).numBooks
+    ).toBe(3);
+  });
+});
+
+describe('compactListeningStats', () => {
+  const days: Record<string, number> = {};
+  for (let i = 0; i < 100; i++) {
+    days[`2026-01-${String(i).padStart(2, '0')}`] = i;
+  }
+
+  const stats = {
+    totalTime: 1_432_478.29,
+    today: 120,
+    dayOfWeek: { Monday: 60 },
+    days,
+    items: {
+      li_1: {
+        id: 'li_1',
+        mediaMetadata: { title: 'Long' },
+        timeListening: 900,
+      },
+      li_2: {
+        id: 'li_2',
+        mediaMetadata: { title: 'Short' },
+        timeListening: 10,
+      },
+    },
+    recentSessions: [
+      {
+        id: 'sess_1',
+        displayTitle: 'Long',
+        timeListening: 60,
+        deviceInfo: { deviceType: 'phone' },
+      },
+    ],
+  };
+
+  it('keeps the totals and reports how much history was dropped', () => {
+    const shaped = compactListeningStats(stats);
+    expect(shaped).toMatchObject({
+      totalTimeSeconds: 1_432_478.29,
+      todaySeconds: 120,
+      numDaysWithListening: 100,
+      numItemsListened: 2,
+    });
+    expect(Object.keys(shaped.recentDaysSeconds as object)).toHaveLength(30);
+    expect(shaped.note).toMatch(/last 30 of 100 days/);
+  });
+
+  it('sorts the top items by time listened', () => {
+    const shaped = compactListeningStats(stats) as {
+      topItems: { id: string }[];
+    };
+    expect(shaped.topItems.map((i) => i.id)).toEqual(['li_1', 'li_2']);
+  });
+
+  it('drops the note when the whole history fits', () => {
+    expect(
+      compactListeningStats({ totalTime: 1, days: { '2026-01-01': 1 } })
+    ).not.toHaveProperty('note');
+  });
+
+  it('counts the embedded sessions instead of repeating list_listening_sessions', () => {
+    const shaped = compactListeningStats(stats);
+    expect(shaped.numRecentSessions).toBe(1);
+    expect(shaped).not.toHaveProperty('recentSessions');
+    expect(JSON.stringify(shaped)).not.toContain('sess_1');
+  });
+
+  it('drops the per-item media metadata', () => {
+    const shaped = compactListeningStats(stats);
+    expect(JSON.stringify(shaped)).not.toContain('mediaMetadata');
+  });
+});
+
+describe('compactAuthor', () => {
+  const author = {
+    id: 'aut_1',
+    name: 'Frank Schätzing',
+    numBooks: 4,
+    description: 'A long biography.',
+  };
+
+  it('omits the biography in lists and keeps it for a single author', () => {
+    expect(compactAuthor(author)).not.toHaveProperty('description');
+    expect(compactAuthor(author, { includeDescription: true })).toMatchObject({
+      id: 'aut_1',
+      name: 'Frank Schätzing',
+      numBooks: 4,
+      description: 'A long biography.',
+    });
   });
 });
 
