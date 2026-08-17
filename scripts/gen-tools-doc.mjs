@@ -65,14 +65,20 @@ function typeName(schema) {
  * entities, and `{{` — Vue interpolation — is broken up.
  */
 function escapeCell(text) {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\{\{/g, '{&#123;')
-    .replace(/\|/g, '\\|')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\{\{/g, '{&#123;')
+      // Backslashes first: the pipe escape below introduces one, and an input
+      // that already contained `\|` would otherwise come out as `\\|` — an
+      // escaped backslash followed by a live pipe, which splits the table cell.
+      .replace(/\\/g, '\\\\')
+      .replace(/\|/g, '\\|')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 function renderTool(tool) {
