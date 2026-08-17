@@ -110,3 +110,40 @@ describe('loadConfig', () => {
     expect(config.insecureTls).toBe(true);
   });
 });
+
+describe('loadConfig URL validation', () => {
+  it('exits on a URL that cannot be parsed at all', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+
+    expect(() =>
+      loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: 'not a url at all',
+          AUDIOBOOKSHELF_API_KEY: 'k',
+        })
+      )
+    ).toThrow('exit');
+    expect(logged.mock.calls.flat().join(' ')).toMatch(/is not a valid URL/);
+
+    exit.mockRestore();
+    logged.mockRestore();
+  });
+});
+
+describe('missingConfigKeys', () => {
+  it('names exactly the variables that are unset', () => {
+    const base = { insecureTls: false, readOnly: false };
+    expect(
+      missingConfigKeys({ ...base, url: undefined, apiKey: undefined })
+    ).toEqual(['AUDIOBOOKSHELF_URL', 'AUDIOBOOKSHELF_API_KEY']);
+    expect(
+      missingConfigKeys({ ...base, url: 'https://a.example.com', apiKey: '' })
+    ).toEqual(['AUDIOBOOKSHELF_API_KEY']);
+    expect(
+      missingConfigKeys({ ...base, url: 'https://a.example.com', apiKey: 'k' })
+    ).toEqual([]);
+  });
+});

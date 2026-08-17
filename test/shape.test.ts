@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compactAuthor,
+  compactBookmark,
+  compactCollection,
+  compactItemPage,
+  compactLibrary,
   compactLibraryItem,
+  compactListeningSession,
   compactListeningStats,
   compactMediaProgress,
   compactPlaylist,
+  compactPodcastEpisode,
   compactSeries,
   compactUser,
   listFrom,
@@ -311,5 +317,217 @@ describe('truncateText', () => {
   it('returns undefined for non-strings', () => {
     expect(truncateText(undefined)).toBeUndefined();
     expect(truncateText(42)).toBeUndefined();
+  });
+});
+
+describe('compactListeningSession', () => {
+  it('renames the ambiguous time fields and flattens the device info', () => {
+    expect(
+      compactListeningSession({
+        id: 'ls_1',
+        displayTitle: 'Der Schwarm',
+        displayAuthor: 'Frank Schätzing',
+        mediaType: 'book',
+        libraryItemId: 'li_abc',
+        timeListening: 1800,
+        currentTime: 2400.5,
+        duration: 3600.5,
+        playMethod: 0,
+        mediaPlayer: 'html5',
+        deviceInfo: { deviceType: 'phone', clientName: 'Abs Android' },
+        date: '2026-08-17',
+        startedAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_100_000,
+      })
+    ).toEqual({
+      id: 'ls_1',
+      displayTitle: 'Der Schwarm',
+      displayAuthor: 'Frank Schätzing',
+      mediaType: 'book',
+      libraryItemId: 'li_abc',
+      timeListeningSeconds: 1800,
+      currentTimeSeconds: 2400.5,
+      durationSeconds: 3600.5,
+      playMethod: 0,
+      mediaPlayer: 'html5',
+      device: 'phone',
+      date: '2026-08-17',
+      startedAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_100_000,
+    });
+  });
+
+  it('falls back to the client name and survives a missing device', () => {
+    expect(
+      compactListeningSession({ id: 'ls_2', deviceInfo: { clientName: 'Web' } })
+        .device
+    ).toBe('Web');
+    expect(compactListeningSession({ id: 'ls_3' }).device).toBeUndefined();
+    expect(compactListeningSession(null)).toEqual({});
+  });
+});
+
+describe('compactBookmark', () => {
+  it('names the position field for what it is', () => {
+    expect(
+      compactBookmark({
+        libraryItemId: 'li_abc',
+        title: 'The reveal',
+        time: 1234.5,
+        createdAt: 1_700_000_000_000,
+      })
+    ).toEqual({
+      libraryItemId: 'li_abc',
+      title: 'The reveal',
+      timeSeconds: 1234.5,
+      createdAt: 1_700_000_000_000,
+    });
+  });
+});
+
+describe('compactLibrary', () => {
+  it('keeps identity and folders and drops the scanner settings', () => {
+    const library = compactLibrary({
+      id: 'lib_1',
+      name: 'Hörbücher',
+      mediaType: 'book',
+      provider: 'audible.de',
+      displayOrder: 1,
+      folders: [
+        { id: 'fol_1', fullPath: '/audiobooks', libraryId: 'lib_1' },
+        { id: 'fol_2', fullPath: '/more' },
+      ],
+      settings: { coverAspectRatio: 1, disableWatcher: false },
+    });
+    expect(library).toEqual({
+      id: 'lib_1',
+      name: 'Hörbücher',
+      mediaType: 'book',
+      provider: 'audible.de',
+      displayOrder: 1,
+      folders: [
+        { id: 'fol_1', fullPath: '/audiobooks' },
+        { id: 'fol_2', fullPath: '/more' },
+      ],
+    });
+    expect(library).not.toHaveProperty('settings');
+  });
+
+  it('yields an empty folder list when there are none', () => {
+    expect(compactLibrary({ id: 'lib_2', name: 'Empty' }).folders).toEqual([]);
+  });
+});
+
+describe('compactPodcastEpisode', () => {
+  it('projects an episode and reads either progress field', () => {
+    expect(
+      compactPodcastEpisode({
+        id: 'ep_1',
+        libraryItemId: 'li_pod',
+        podcastId: 'pod_1',
+        title: 'Folge 1',
+        season: '1',
+        episode: '1',
+        episodeType: 'full',
+        publishedAt: 1_700_000_000_000,
+        pubDate: 'Mon, 01 Jan 2026 00:00:00 +0000',
+        duration: 2400,
+        size: 30_000_000,
+        description: 'Lang und breit.',
+        progress: { id: 'mp_9', progress: 0.5 },
+      })
+    ).toMatchObject({
+      id: 'ep_1',
+      title: 'Folge 1',
+      durationSeconds: 2400,
+      sizeBytes: 30_000_000,
+      progress: { id: 'mp_9', progressPercent: 50 },
+    });
+
+    // userMediaProgress wins where both exist, and the description stays out
+    // of list projections.
+    const listed = compactPodcastEpisode({
+      id: 'ep_2',
+      description: 'not in lists',
+      userMediaProgress: { id: 'mp_10' },
+    });
+    expect(listed.progress).toEqual({ id: 'mp_10' });
+    expect(listed.description).toBeUndefined();
+  });
+});
+
+describe('compactCollection', () => {
+  it('counts and projects the embedded books', () => {
+    const collection = compactCollection({
+      id: 'col_1',
+      libraryId: 'lib_1',
+      name: 'Sommer 2026',
+      description: '  Was ich   im Sommer höre.  ',
+      books: [
+        { id: 'li_1', mediaType: 'book', media: { metadata: { title: 'A' } } },
+        { id: 'li_2', mediaType: 'book', media: { metadata: { title: 'B' } } },
+      ],
+      createdAt: 1_700_000_000_000,
+      lastUpdate: 1_700_000_100_000,
+    });
+    expect(collection).toMatchObject({
+      id: 'col_1',
+      name: 'Sommer 2026',
+      description: 'Was ich im Sommer höre.',
+      numBooks: 2,
+    });
+    expect(collection.books).toEqual([
+      { id: 'li_1', mediaType: 'book', title: 'A' },
+      { id: 'li_2', mediaType: 'book', title: 'B' },
+    ]);
+  });
+});
+
+describe('compactItemPage', () => {
+  it('keeps the paging fields and projects the results', () => {
+    const page = {
+      total: 120,
+      page: 2,
+      limit: 25,
+      sortBy: 'media.metadata.title',
+      filterBy: 'authors.YWJj',
+      results: [
+        { id: 'li_1', mediaType: 'book', media: { metadata: { title: 'A' } } },
+      ],
+    };
+    expect(compactItemPage(page, 'compact')).toEqual({
+      total: 120,
+      page: 2,
+      limit: 25,
+      sortBy: 'media.metadata.title',
+      filterBy: 'authors.YWJj',
+      numReturned: 1,
+      results: [{ id: 'li_1', mediaType: 'book', title: 'A' }],
+    });
+    // detail="full" hands the raw entries through unchanged.
+    expect(compactItemPage(page, 'full').results).toEqual(page.results);
+  });
+});
+
+describe('compactAuthor', () => {
+  it('projects the attributed library items when the API embeds them', () => {
+    expect(
+      compactAuthor({
+        id: 'aut_1',
+        name: 'Frank Schätzing',
+        libraryItems: [
+          {
+            id: 'li_1',
+            mediaType: 'book',
+            media: { metadata: { title: 'Der Schwarm' } },
+          },
+        ],
+      })
+    ).toMatchObject({
+      id: 'aut_1',
+      name: 'Frank Schätzing',
+      numBooks: 1,
+      libraryItems: [{ id: 'li_1', title: 'Der Schwarm' }],
+    });
   });
 });

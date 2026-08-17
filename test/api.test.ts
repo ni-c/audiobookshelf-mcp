@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -126,5 +129,54 @@ describe('AudiobookshelfApi', () => {
       'application/json'
     );
     fetchSpy.mockRestore();
+  });
+});
+
+describe('AudiobookshelfApi transport', () => {
+  it('returns the raw text when a JSON content type carries invalid JSON', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{ this is not json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    await expect(new AudiobookshelfApi(config).get('/api/x')).resolves.toBe(
+      '{ this is not json'
+    );
+    vi.restoreAllMocks();
+  });
+
+  it('scopes relaxed TLS to its own dispatcher instead of the whole process', async () => {
+    const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    const globalFetch = vi.spyOn(globalThis, 'fetch');
+
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, path: req.url }));
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve)
+    );
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      const api = new AudiobookshelfApi({
+        ...config,
+        url: `http://127.0.0.1:${port}`,
+        insecureTls: true,
+      });
+      await expect(api.get('/api/libraries')).resolves.toEqual({
+        ok: true,
+        path: '/api/libraries',
+      });
+      // The insecure path uses undici's own fetch, not the global one, so a
+      // test stub of global fetch stays untouched — and nothing global is
+      // weakened for unrelated requests.
+      expect(globalFetch).not.toHaveBeenCalled();
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe(before);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      vi.restoreAllMocks();
+    }
   });
 });

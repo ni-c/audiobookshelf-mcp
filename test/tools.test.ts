@@ -446,3 +446,277 @@ describe('write tools', () => {
     }
   );
 });
+
+/** Text of the first content block of a tool result. */
+function firstText(result: unknown): string {
+  const content = (result as { content?: { text?: string }[] }).content ?? [];
+  return content[0]?.text ?? '';
+}
+
+/** The JSON payload of a result, with the untrusted-content preamble stripped. */
+function payload(result: unknown): Record<string, unknown> {
+  const text = firstText(result);
+  const start = text.indexOf('{');
+  return JSON.parse(text.slice(start === -1 ? 0 : start)) as Record<
+    string,
+    unknown
+  >;
+}
+
+describe('projections in the read tools', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shapes the personalized shelves and passes non-media entities through', async () => {
+    mockFetch([
+      {
+        id: 'continue-listening',
+        label: 'Continue Listening',
+        type: 'book',
+        entities: [
+          {
+            id: 'li_1',
+            mediaType: 'book',
+            media: {
+              metadata: { title: 'Der Schwarm' },
+              audioFiles: [{ metadata: { filename: 'part1.m4b' } }],
+            },
+          },
+        ],
+      },
+      {
+        id: 'recent-series',
+        label: 'Recent Series',
+        type: 'series',
+        entities: [{ id: 'ser_1', name: 'Ozean' }],
+      },
+    ]);
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'get_personalized_shelves',
+      arguments: { library_id: 'lib_1' },
+    });
+
+    const shelves = JSON.parse(
+      firstText(result).slice(firstText(result).indexOf('['))
+    ) as { type: string; entities: Record<string, unknown>[] }[];
+    expect(shelves).toHaveLength(2);
+    // A book shelf is projected...
+    expect(shelves[0]!.entities[0]).toEqual({
+      id: 'li_1',
+      mediaType: 'book',
+      title: 'Der Schwarm',
+    });
+    // ...a series shelf is handed through as-is.
+    expect(shelves[1]!.entities[0]).toEqual({ id: 'ser_1', name: 'Ozean' });
+    expect(firstText(result)).not.toContain('part1.m4b');
+  });
+
+  it('projects the series and author lists', async () => {
+    mockFetch({
+      total: 1,
+      page: 0,
+      limit: 25,
+      series: [{ id: 'ser_1', name: 'Ozean', libraryItemIds: ['a', 'b'] }],
+    });
+    const seriesResult = await (
+      await connect()
+    ).callTool({ name: 'list_series', arguments: { library_id: 'lib_1' } });
+    expect(payload(seriesResult).results).toEqual([
+      { id: 'ser_1', name: 'Ozean', numBooks: 2 },
+    ]);
+
+    vi.restoreAllMocks();
+    mockFetch({
+      authors: [
+        {
+          id: 'aut_1',
+          name: 'Frank Schätzing',
+          numBooks: 9,
+          description: 'Bio',
+        },
+      ],
+    });
+    const authorResult = await (
+      await connect()
+    ).callTool({ name: 'list_authors', arguments: { library_id: 'lib_1' } });
+    expect(payload(authorResult)).toMatchObject({
+      numAuthors: 1,
+      authors: [{ id: 'aut_1', name: 'Frank Schätzing', numBooks: 9 }],
+    });
+    // A biography runs to hundreds of words — not in a list.
+    expect(firstText(authorResult)).not.toContain('Bio');
+  });
+
+  it('projects the items-in-progress list', async () => {
+    mockFetch({
+      libraryItems: [
+        {
+          id: 'li_1',
+          mediaType: 'book',
+          media: {
+            metadata: { title: 'Der Schwarm' },
+            audioFiles: [{ metadata: { filename: 'part1.m4b' } }],
+          },
+          progressLastUpdate: 1_700_000_000_000,
+        },
+      ],
+    });
+    const result = await (
+      await connect()
+    ).callTool({ name: 'list_items_in_progress', arguments: {} });
+    expect(payload(result)).toEqual({
+      numReturned: 1,
+      libraryItems: [
+        {
+          id: 'li_1',
+          mediaType: 'book',
+          title: 'Der Schwarm',
+          progressLastUpdate: 1_700_000_000_000,
+        },
+      ],
+    });
+  });
+
+  it('names the podcast a recent episode belongs to', async () => {
+    mockFetch({
+      limit: 25,
+      page: 0,
+      episodes: [
+        {
+          id: 'ep_1',
+          title: 'Folge 1',
+          duration: 2400,
+          podcast: { metadata: { title: 'Lage der Nation' } },
+        },
+        { id: 'ep_2', title: 'Folge 2' },
+      ],
+    });
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'list_recent_episodes',
+      arguments: { library_id: 'lib_1' },
+    });
+    const body = payload(result) as { episodes: Record<string, unknown>[] };
+    expect(body.episodes[0]).toMatchObject({
+      id: 'ep_1',
+      title: 'Folge 1',
+      durationSeconds: 2400,
+      podcastTitle: 'Lage der Nation',
+    });
+    // Without an embedded podcast there is simply no title to add.
+    expect(body.episodes[1]).not.toHaveProperty('podcastTitle');
+  });
+
+  it('shapes podcast hits in the grouped search response', async () => {
+    mockFetch({
+      podcast: [
+        {
+          matchKey: 'title',
+          matchText: 'Lage',
+          libraryItem: {
+            id: 'li_pod',
+            mediaType: 'podcast',
+            media: { metadata: { title: 'Lage der Nation' } },
+          },
+        },
+      ],
+    });
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'search_library',
+      arguments: { library_id: 'lib_1', q: 'lage' },
+    });
+    const body = payload(result) as { podcast: Record<string, unknown>[] };
+    expect(body.podcast[0]).toEqual({
+      matchKey: 'title',
+      matchText: 'Lage',
+      libraryItem: {
+        id: 'li_pod',
+        mediaType: 'podcast',
+        title: 'Lage der Nation',
+      },
+    });
+  });
+});
+
+describe('write tool edge cases', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reads the progress back so the model sees what was stored', async () => {
+    const spy = mockFetch({ id: 'mp_1', progress: 0.5, currentTime: 120 });
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'set_media_progress',
+      arguments: { library_item_id: 'li_1', current_time: 120 },
+    });
+
+    const calls = callsOf(spy);
+    expect(calls.map((c) => c.method)).toEqual(['PATCH', 'GET']);
+    expect(firstText(result)).toMatch(/^Progress updated\./);
+    expect(firstText(result)).toContain('"currentTime": 120');
+  });
+
+  it('refuses a bookmark position that is not a finite number', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'delete_bookmark',
+      arguments: { library_item_id: 'li_1', time: Number.POSITIVE_INFINITY },
+    });
+    expect(result.isError).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('says so when removing the last entry deleted the playlist', async () => {
+    mockFetch({ id: 'pl_1', name: 'Roadtrip', items: [] });
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'remove_items_from_playlist',
+      arguments: { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    });
+    expect(firstText(result)).toMatch(/deleted by Audiobookshelf/);
+    expect(firstText(result)).toMatch(/cannot be restored/i);
+  });
+
+  it('sends the optional description only when it was given', async () => {
+    const spy = mockFetch({ id: 'col_1', name: 'X', books: [] });
+    const client = await connect();
+    await client.callTool({
+      name: 'create_collection',
+      arguments: {
+        library_id: 'lib_1',
+        name: 'X',
+        library_item_ids: ['li_1'],
+        description: 'Because',
+      },
+    });
+    await client.callTool({
+      name: 'create_playlist',
+      arguments: { library_id: 'lib_1', name: 'Y' },
+    });
+
+    const [collection, playlist] = callsOf(spy);
+    expect(collection!.body).toEqual({
+      libraryId: 'lib_1',
+      name: 'X',
+      description: 'Because',
+      books: ['li_1'],
+    });
+    // No description passed, and an omitted item list becomes an empty one.
+    expect(playlist!.body).toEqual({
+      libraryId: 'lib_1',
+      name: 'Y',
+      items: [],
+    });
+  });
+});

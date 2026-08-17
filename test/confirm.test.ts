@@ -48,3 +48,27 @@ describe('ConfirmationStore', () => {
     expect(store.consume(resource, token)).toBe(false);
   });
 });
+
+describe('ConfirmationStore bounds', () => {
+  it('evicts the oldest pending token instead of growing without limit', () => {
+    const store = new ConfirmationStore();
+    // MAX_PENDING is 100: issuing 101 tokens must drop the first one, so a
+    // loop of refused calls cannot be used to grow the map indefinitely.
+    const first = setResourceKey('delete_item', ['0']);
+    const firstToken = store.issue(first);
+    for (let i = 1; i <= 100; i++) {
+      store.issue(setResourceKey('delete_item', [String(i)]));
+    }
+
+    expect(store.consume(first, firstToken)).toBe(false);
+    // The most recent one is still there.
+    const last = setResourceKey('delete_item', ['100']);
+    const lastToken = store.issue(last);
+    expect(store.consume(last, lastToken)).toBe(true);
+  });
+
+  it('reports its TTL in whole minutes for the prompt text', () => {
+    expect(new ConfirmationStore().ttlMinutes).toBe(5);
+    expect(new ConfirmationStore(90_000).ttlMinutes).toBe(2);
+  });
+});

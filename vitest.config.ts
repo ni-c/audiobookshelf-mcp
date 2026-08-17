@@ -8,14 +8,19 @@ export default defineConfig({
       // Entry point: only wires config and server to the stdio transport and
       // exits the process; not reachable from unit tests.
       exclude: ['src/index.ts'],
-      // Measured on 2026-08-17: 93.87 statements / 85.86 branches / 93.75
-      // functions / 93.9 lines. The thresholds sit just below that — write the
-      // missing tests instead of lowering them.
+      // Measured on 2026-08-17: 99.61 statements / 91.56 branches / 100
+      // functions / 99.6 lines. The thresholds sit just below that, with
+      // headroom on functions — write the missing tests instead of lowering
+      // them.
+      //
+      // The two uncovered statements are deliberate belt-and-braces: the
+      // package.json fallback in server.ts, and the finite-number guard in
+      // delete_bookmark that the zod schema already rejects one layer earlier.
       thresholds: {
-        statements: 90,
-        branches: 82,
-        functions: 90,
-        lines: 90,
+        statements: 97,
+        branches: 88,
+        functions: 95,
+        lines: 97,
       },
     },
   },
