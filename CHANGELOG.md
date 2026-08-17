@@ -15,6 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-17
+
+First release published by the automated pipeline, with npm provenance.
+
+### Added
+
+- Multi-arch container image on GHCR (`ghcr.io/ni-c/audiobookshelf-mcp`) for
+  linux/amd64 and linux/arm64, built with an SBOM and build provenance.
+- Documentation site at <https://audiobookshelf-mcp.ni-c.de>, including a
+  complete tool reference generated from the registered tools.
+- Listed in the official MCP registry as `io.github.ni-c/audiobookshelf-mcp`.
+- `SECURITY.md` with the trust model, `CONTRIBUTING.md`, and issue forms.
+
+### Changed
+
+- The runtime image no longer contains npm. It was only ever there because the
+  base image ships it, the entrypoint is plain `node`, and the dependency tree
+  npm vendors accounted for every HIGH/CRITICAL advisory Trivy reported against
+  the image — none of them in this project's own dependencies.
+
+### Fixed
+
+- Test coverage raised from 93.9 % to 99.6 % of statements, mostly across the
+  projections that absorb Audiobookshelf's varying response shapes, and the
+  error paths.
+
 ## [0.1.0] - 2026-08-17
 
 ### Added
