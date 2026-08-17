@@ -17,6 +17,18 @@ FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a5
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Drop the npm that ships inside the base image. The entrypoint is plain `node`,
+# so nothing here needs a package manager — and npm vendors its own dependency
+# tree, which is where every HIGH/CRITICAL Trivy finding on this image came from:
+# undici 6.26.0 (CVE-2026-12151), tar 7.5.16 (CVE-2026-59873/59874),
+# brace-expansion 5.0.6 (CVE-2026-13149/14257/69152) and ip-address 10.2.0
+# (CVE-2026-69192) — none of them ours (we ship undici 8.10.0), none of them
+# reachable at runtime. Upgrading npm instead only moves the problem to the next
+# advisory. Note this does not shrink the image: the files still sit in the base
+# layer. It removes them from the final filesystem, which is what Trivy scans and
+# what a process in the container can reach.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 # The server reports its version from package.json at runtime.

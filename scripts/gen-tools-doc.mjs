@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+/**
+ * Generates docs/reference/tools.md from the tools the server actually
+ * registers, so the reference for 44 tools cannot drift from the code.
+ *
+ *   node scripts/gen-tools-doc.mjs           write the file
+ *   node scripts/gen-tools-doc.mjs --check   fail if the committed file is stale
+ *
+ * Runs against dist/, so `npm run build` has to come first. Plain JavaScript on
+ * purpose: no extra toolchain, and it works on every Node version in the matrix.
+ *
+ * The curated summary table in README.md is NOT generated — it groups the tools
+ * by what someone would want to do with them, which is editorial. Only this
+ * complete reference, with every parameter, is mechanical enough to generate.
+ */
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+
+import { createServer } from '../dist/server.js';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const target = join(root, 'docs', 'reference', 'tools.md');
+
+/** Connects to a fully configured server so every tool is registered. */
+async function listTools() {
+  const server = createServer({
+    url: 'https://abs.example.com',
+    apiKey: 'placeholder',
+    insecureTls: false,
+    readOnly: false,
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'gen-tools-doc', version: '0' });
+  await Promise.all([
+    client.connect(clientTransport),
+    server.connect(serverTransport),
+  ]);
+  const { tools } = await client.listTools();
+  await client.close();
+  return tools;
+}
+
+/** A JSON Schema node rendered as a short type name. */
+function typeName(schema) {
+  if (!schema) return 'unknown';
+  if (Array.isArray(schema.enum)) {
+    return schema.enum.map((v) => `\`"${v}"\``).join(' \\| ');
+  }
+  if (schema.type === 'array') {
+    return `${typeName(schema.items)}[]`;
+  }
+  if (schema.type === 'object') return 'object';
+  return schema.type ?? 'unknown';
+}
+
+function escapeCell(text) {
+  return String(text ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderTool(tool) {
+  const kind = tool.annotations?.readOnlyHint
+    ? 'read-only'
+    : tool.annotations?.destructiveHint
+      ? 'write, destructive'
+      : 'write';
+
+  const lines = [`### \`${tool.name}\``, ''];
+  if (tool.title) lines.push(`**${tool.title}** — ${kind}`, '');
+  lines.push(escapeCell(tool.description), '');
+
+  const properties = tool.inputSchema?.properties ?? {};
+  const required = new Set(tool.inputSchema?.required ?? []);
+  const names = Object.keys(properties);
+
+  if (names.length === 0) {
+    lines.push('Takes no parameters.', '');
+    return lines;
+  }
+
+  lines.push(
+    '| Parameter | Type | Required | Description |',
+    '| --- | --- | --- | --- |'
+  );
+  for (const name of names) {
+    const schema = properties[name];
+    lines.push(
+      `| \`${name}\` | ${typeName(schema)} | ${required.has(name) ? 'yes' : 'no'} | ${escapeCell(schema?.description)} |`
+    );
+  }
+  lines.push('');
+  return lines;
+}
+
+function render(tools) {
+  const read = tools.filter((t) => t.annotations?.readOnlyHint);
+  const write = tools.filter((t) => !t.annotations?.readOnlyHint);
+
+  const out = [
+    '<!--',
+    '  GENERATED FILE — do not edit by hand.',
+    '  Regenerate with: npm run build && npm run docs:tools',
+    '  The CI test job fails when this file is out of date.',
+    '-->',
+    '',
+    '# Tool reference',
+    '',
+    `All ${tools.length} tools: ${read.length} read, ${write.length} write.`,
+    'With `AUDIOBOOKSHELF_READ_ONLY=true` the write tools are not registered at all.',
+    '',
+    'Every tool that returns media accepts `detail` — `"compact"` (the default)',
+    'returns a projection with the fields that matter for browsing, `"full"`',
+    'returns the raw Audiobookshelf object, which is very large.',
+    '',
+    '## Read tools',
+    '',
+  ];
+  for (const tool of read) out.push(...renderTool(tool));
+  out.push('## Write tools', '');
+  for (const tool of write) out.push(...renderTool(tool));
+
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+const tools = await listTools();
+const generated = render(tools);
+
+if (process.argv.includes('--check')) {
+  let current = null;
+  try {
+    current = readFileSync(target, 'utf8');
+  } catch {
+    console.error(`${target} is missing — run: npm run docs:tools`);
+    process.exit(1);
+  }
+  if (current !== generated) {
+    console.error(
+      `${target} is out of date — run: npm run build && npm run docs:tools`
+    );
+    process.exit(1);
+  }
+  console.log(`${target} is up to date (${tools.length} tools)`);
+} else {
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, generated);
+  console.log(`wrote ${target} (${tools.length} tools)`);
+}

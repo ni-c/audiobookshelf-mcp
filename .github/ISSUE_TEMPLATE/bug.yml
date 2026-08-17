@@ -1,0 +1,39 @@
+name: Bug report
+description: Something behaves wrongly or breaks
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 'audiobookshelf-mcp version'
+      placeholder: '0.1.0 (npm version, docker tag or commit)'
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: 'Audiobookshelf version'
+      description: >-
+        From Settings -> About, or GET /status. API keys need 2.26.0 or newer.
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: 'Claude Code, Claude Desktop, Codex, MCP Inspector, …'
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Which tool you called with which arguments, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >-
+        Tool result or stderr. Please redact API keys, internal hostnames and IPs —
+        this issue is public. Book and podcast titles can identify you too.
+      render: text
