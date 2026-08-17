@@ -1,0 +1,193 @@
+# audiobookshelf-mcp
+
+An [MCP](https://modelcontextprotocol.io) server for
+[Audiobookshelf](https://www.audiobookshelf.org/), the self-hosted audiobook and
+podcast server. It lets an AI assistant browse your libraries, answer questions
+about what you own and what you have listened to, and — unless you switch it off —
+keep your listening progress, bookmarks, collections and playlists up to date.
+
+44 tools: 29 read, 15 write.
+
+> **Status: private preview.** Not published to npm, no CI yet.
+
+## Requirements
+
+- Node.js 22 or newer
+- Audiobookshelf **2.26.0 or newer** — earlier versions have no API keys
+- An Audiobookshelf API key
+
+## Getting an API key
+
+API keys are managed by an admin under **Settings → Users → API Keys**. A key acts
+on behalf of exactly one Audiobookshelf user and inherits that user's permissions,
+so a key issued for a normal account cannot see libraries that account cannot see,
+and cannot delete anything unless that account may delete. The key is shown only
+once, at creation.
+
+## Configuration
+
+| Variable                      | Required | Description                                                                             |
+| ----------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `AUDIOBOOKSHELF_URL`          | yes      | Base URL of the instance, e.g. `https://abs.example.com`. Must not contain credentials. |
+| `AUDIOBOOKSHELF_API_KEY`      | yes      | API key, sent as `Authorization: Bearer …`                                              |
+| `AUDIOBOOKSHELF_READ_ONLY`    | no       | `true` registers only the 29 read tools                                                 |
+| `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `true` accepts self-signed certificates — scoped to this connection, not process-wide   |
+
+The server starts without configuration: it completes the MCP handshake and lists
+its tools, and every call then fails with the setup instructions. That is
+deliberate, so registries and sandbox inspectors can introspect it.
+
+## Install
+
+```sh
+claude mcp add audiobookshelf \
+  -e AUDIOBOOKSHELF_URL=https://abs.example.com \
+  -e AUDIOBOOKSHELF_API_KEY=… \
+  -- npx -y audiobookshelf-mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "audiobookshelf": {
+      "command": "npx",
+      "args": ["-y", "audiobookshelf-mcp"],
+      "env": {
+        "AUDIOBOOKSHELF_URL": "https://abs.example.com",
+        "AUDIOBOOKSHELF_API_KEY": "…"
+      }
+    }
+  }
+}
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.audiobookshelf]
+command = "npx"
+args = ["-y", "audiobookshelf-mcp"]
+env = { AUDIOBOOKSHELF_URL = "https://abs.example.com", AUDIOBOOKSHELF_API_KEY = "…" }
+```
+
+## Tools
+
+### Reading
+
+| Tool                                  | What it does                                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `list_libraries`                      | The accessible libraries with id, name and media type — the entry point                             |
+| `get_library`                         | One library with its folders and settings                                                           |
+| `get_library_stats`                   | Item, author and genre counts, total duration and size                                              |
+| `get_library_filter_data`             | The filterable values of a library: authors, genres, tags, series, narrators, languages, publishers |
+| `list_library_items`                  | Items of a library, paginated, sortable, filterable                                                 |
+| `search_library`                      | Full-text search across books, podcasts, series, authors, narrators and tags                        |
+| `get_personalized_shelves`            | The home screen shelves: Continue Listening, Recently Added, …                                      |
+| `list_series` / `get_series`          | Series with book count and total duration                                                           |
+| `list_authors` / `get_author`         | Authors, optionally with their items                                                                |
+| `list_tags` / `list_genres`           | All tags / genres used on the server                                                                |
+| `get_library_item`                    | One book or podcast with metadata, tags and your progress                                           |
+| `get_item_chapters`                   | The chapter list of a book, separate because it can be long                                         |
+| `get_podcast_episode`                 | One episode with publication date, duration and description                                         |
+| `list_recent_episodes`                | Newest episodes of a podcast library                                                                |
+| `get_me`                              | The user the API key acts for, with permissions and libraries                                       |
+| `list_items_in_progress`              | Started but unfinished items across all libraries                                                   |
+| `get_media_progress`                  | Position, percentage and finished state for one item                                                |
+| `get_listening_stats`                 | Total time, time per day and per weekday, most listened items                                       |
+| `get_year_stats`                      | The "year in review" figures for one calendar year                                                  |
+| `list_listening_sessions`             | Playback sessions with device, position and time listened                                           |
+| `list_bookmarks`                      | Bookmarks, all of them or those of one item                                                         |
+| `list_collections` / `get_collection` | Collections — shared, ordered groups of books                                                       |
+| `list_playlists` / `get_playlist`     | Playlists — private per user, books or episodes                                                     |
+| `get_server_status`                   | Version and initialization state of the server                                                      |
+
+### Writing
+
+| Tool                                                            | What it does                                                            |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `set_media_progress`                                            | Set position, mark finished or unfinished, hide from Continue Listening |
+| `delete_media_progress`                                         | Delete a progress record — needs a confirmation token                   |
+| `create_bookmark` / `update_bookmark` / `delete_bookmark`       | Named positions in a book                                               |
+| `create_collection` / `update_collection` / `delete_collection` | Collections; delete needs a confirmation token                          |
+| `add_books_to_collection` / `remove_books_from_collection`      | Collection membership                                                   |
+| `create_playlist` / `update_playlist` / `delete_playlist`       | Playlists; delete needs a confirmation token                            |
+| `add_items_to_playlist` / `remove_items_from_playlist`          | Playlist membership                                                     |
+
+### Response size
+
+Audiobookshelf returns very large objects — an expanded library item carries every
+audio file, track and chapter with full ffprobe metadata. Every tool that returns
+media therefore answers with a compact projection by default and accepts
+`detail: "full"` for the raw object. List tools are capped at 100 entries per call
+and say how to page on when more match.
+
+### Filtering
+
+`list_library_items` takes `filter_group` plus `filter_value` and builds the
+base64-encoded `filter` parameter the API expects. The valid values come from
+`get_library_filter_data`. A valued group without a value is rejected, because
+Audiobookshelf would silently answer with the _unfiltered_ library instead.
+
+```
+filter_group="authors",  filter_value="<author id>"
+filter_group="progress", filter_value="finished" | "in-progress" | "not-started" | "not-finished"
+filter_group="issues"    (standalone, no value)
+```
+
+## Safety
+
+- **Read-only mode.** `AUDIOBOOKSHELF_READ_ONLY=true` does not register the write
+  tools at all, rather than refusing them at call time.
+- **Confirmation tokens.** `delete_collection`, `delete_playlist` and
+  `delete_media_progress` answer the first call with a single-use token that is
+  bound to the target id and expires after five minutes; only a second call
+  carrying that token performs the deletion. A plain `confirm: true` flag could be
+  set by the model on the first try, or be talked into it by text coming out of
+  the library. Operations that are cheap to undo — removing an item from a
+  collection, deleting a bookmark — are marked destructive but do not require a
+  token.
+- **Confirmation prompts never quote API content.** Collection and playlist names
+  are user-supplied text and are read by a model, so the prompts name only ids.
+- **Untrusted content is marked.** Book descriptions come from metadata providers
+  and podcast summaries come from RSS feeds — third parties write them. Every
+  result carrying such content is labelled as data, not instructions.
+- **The API key is deleted from the environment** once the configuration has been
+  read, so it is not visible to child processes or in `/proc/<pid>/environ`.
+- **No redirects are followed** (`redirect: 'error'`), so the `Authorization`
+  header cannot be replayed against another host, and every request has a 15
+  second timeout.
+- **Ids are validated** before they enter a URL path.
+- **Upstream error bodies are sanitized**: HTML error pages are dropped, anything
+  else is truncated to 2000 characters.
+- **Progress updates send whitelisted fields only.** The Audiobookshelf endpoint
+  applies its payload to the progress record wholesale.
+- **What this server cannot do**, by design: no user management, no server
+  settings, no backups, no cache purging, no filesystem browsing, no library or
+  item deletion, no metadata rewriting, no file uploads.
+
+One caveat that comes from Audiobookshelf itself: removing the _last_ entry from a
+playlist deletes the playlist. `remove_items_from_playlist` says so in its result
+when it happens.
+
+## Development
+
+```sh
+npm install
+npm run lint          # eslint + prettier --check
+npm run build         # tsc
+npm test              # vitest
+npm run test:coverage # with thresholds
+```
+
+The tool definitions were derived from the Audiobookshelf server source
+(`server/routers/ApiRouter.js` and the controllers) rather than from
+[api.audiobookshelf.org](https://api.audiobookshelf.org/), which is out of date in
+several places — the filter data endpoint is `/filterdata` not `/filter`, progress
+updates are `PATCH /api/me/progress/:id` not `POST /api/me/progress`, and bookmarks
+live under `/api/me/item/:id/bookmark`.
+
+## License
+
+MIT
