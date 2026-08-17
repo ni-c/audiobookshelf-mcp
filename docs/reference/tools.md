@@ -103,7 +103,7 @@ The shelves of the Audiobookshelf home screen for this user: Continue Listening,
 
 **List series** — read-only
 
-Lists the series of a book library with their number of books and total duration. To list the books of one series, call list_library_items with filter_group="series" and filter_value=<series id>.
+Lists the series of a book library with their number of books and total duration. To list the books of one series, call list_library_items with filter_group="series" and filter_value=&lt;series id&gt;.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -129,7 +129,7 @@ Fetches a single series by id, including its books. To list the books with pagin
 
 **List authors** — read-only
 
-Lists all authors of a book library with their number of books. To list the books of one author, call list_library_items with filter_group="authors" and filter_value=<author id>.
+Lists all authors of a book library with their number of books. To list the books of one author, call list_library_items with filter_group="authors" and filter_value=&lt;author id&gt;.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

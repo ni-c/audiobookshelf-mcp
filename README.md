@@ -1,5 +1,13 @@
 # audiobookshelf-mcp
 
+[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/audiobookshelf-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/audiobookshelf-mcp/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/audiobookshelf-mcp)](https://www.npmjs.com/package/audiobookshelf-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/audiobookshelf-mcp)](https://www.npmjs.com/package/audiobookshelf-mcp)
+[![node](https://img.shields.io/node/v/audiobookshelf-mcp)](https://nodejs.org)
+[![Container](https://img.shields.io/badge/ghcr.io-ni--c%2Faudiobookshelf--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/ni-c/audiobookshelf-mcp/pkgs/container/audiobookshelf-mcp)
+[![license](https://img.shields.io/npm/l/audiobookshelf-mcp)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-audiobookshelf--mcp.ni--c.de-4f46e5)](https://audiobookshelf-mcp.ni-c.de)
+
 An [MCP](https://modelcontextprotocol.io) server for
 [Audiobookshelf](https://www.audiobookshelf.org/), the self-hosted audiobook and
 podcast server. It lets an AI assistant browse your libraries, answer questions
@@ -8,7 +16,9 @@ keep your listening progress, bookmarks, collections and playlists up to date.
 
 44 tools: 29 read, 15 write.
 
-> **Status: private preview.** Not published to npm, no CI yet.
+📖 **Full documentation: <https://audiobookshelf-mcp.ni-c.de>**
+
+<img src="https://audiobookshelf-mcp.ni-c.de/architecture.svg" alt="An MCP client talks to audiobookshelf-mcp over stdio; the server exposes 29 read and 15 write tools, compacts every response, and calls the Audiobookshelf REST API over HTTPS with a bearer API key" width="800">
 
 ## Requirements
 
@@ -71,6 +81,20 @@ command = "npx"
 args = ["-y", "audiobookshelf-mcp"]
 env = { AUDIOBOOKSHELF_URL = "https://abs.example.com", AUDIOBOOKSHELF_API_KEY = "…" }
 ```
+
+Container (multi-arch, with SBOM and build provenance):
+
+```sh
+docker run -i --rm \
+  -e AUDIOBOOKSHELF_URL=https://abs.example.com \
+  -e AUDIOBOOKSHELF_API_KEY=… \
+  ghcr.io/ni-c/audiobookshelf-mcp
+```
+
+`-i` is required — the protocol runs over stdin and stdout. There is no port to
+publish. More client recipes, including how to keep the key off the `docker run`
+command line, are in the
+[client guide](https://audiobookshelf-mcp.ni-c.de/guide/clients).
 
 ## Tools
 
@@ -179,7 +203,15 @@ npm run lint          # eslint + prettier --check
 npm run build         # tsc
 npm test              # vitest
 npm run test:coverage # with thresholds
+npm run docs:tools    # regenerate docs/reference/tools.md from the registered tools
 ```
+
+The table above is hand-curated; the complete
+[tool reference](https://audiobookshelf-mcp.ni-c.de/reference/tools) with every
+parameter is generated from the code, and CI fails if the committed copy is stale.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for a throwaway Audiobookshelf you can
+safely write to — the write tools change progress and bookmarks on the API key's
+own user, so don't develop against a library you care about.
 
 The tool definitions were derived from the Audiobookshelf server source
 (`server/routers/ApiRouter.js` and the controllers) rather than from
@@ -187,6 +219,34 @@ The tool definitions were derived from the Audiobookshelf server source
 several places — the filter data endpoint is `/filterdata` not `/filter`, progress
 updates are `PATCH /api/me/progress/:id` not `POST /api/me/progress`, and bookmarks
 live under `/api/me/item/:id/bookmark`.
+
+## Releasing
+
+Tag-driven, no manual publish step:
+
+1. Move the `[Unreleased]` entries into a new `## [x.y.z] - YYYY-MM-DD` section in
+   `CHANGELOG.md` and bump `package.json`.
+2. `npm run lint && npm run build && npm run test:coverage`.
+3. Commit, then a **signed annotated** tag: `git tag -s vx.y.z -m "vx.y.z"`.
+4. `git push origin main vx.y.z`.
+
+`release.yml` then runs the tests, publishes to npm with provenance via Trusted
+Publishing (no token secret involved), creates the GitHub release from the
+CHANGELOG section, and publishes to the
+[MCP registry](https://registry.modelcontextprotocol.io) as
+`io.github.ni-c/audiobookshelf-mcp`. `ci.yml` pushes the multi-arch image to GHCR
+on the same tag.
+
+If the registry step fails, fix it on `main` and dispatch the
+`Publish to MCP Registry` workflow — do **not** re-run the tag job, which would
+check out the old tree.
+
+## Contributing
+
+Issues, discussions and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use
+[private reporting](https://github.com/ni-c/audiobookshelf-mcp/security/advisories/new)
+rather than a public issue; the policy is in [SECURITY.md](SECURITY.md).
 
 ## License
 

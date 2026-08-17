@@ -5,8 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- The release workflow extracts the section of the version being tagged with awk,
-     matching "## [x.y.z]". Keep that heading shape exactly. -->
+<!-- Two things read this file mechanically:
+     * The release workflow extracts the section of the version being tagged with
+       awk, matching "## [x.y.z]". Keep that heading shape exactly.
+     * docs/reference/changelog.md includes everything from line 16 down (the
+       "## [Unreleased]" heading). Adding lines above it shifts that range and the
+       include fails silently — update the number there too. -->
+<!-- Content starts on the next line; see the note above before inserting here. -->
 
 ## [Unreleased]
 

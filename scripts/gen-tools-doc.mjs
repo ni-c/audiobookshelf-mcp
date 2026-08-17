@@ -58,8 +58,18 @@ function typeName(schema) {
   return schema.type ?? 'unknown';
 }
 
+/**
+ * Markdown alone is not enough here: VitePress compiles every page as a Vue
+ * template, so a description containing `filter_value=<author id>` is parsed as
+ * an unclosed HTML tag and fails the docs build. Angle brackets therefore become
+ * entities, and `{{` — Vue interpolation — is broken up.
+ */
 function escapeCell(text) {
   return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\{\{/g, '{&#123;')
     .replace(/\|/g, '\\|')
     .replace(/\s+/g, ' ')
     .trim();

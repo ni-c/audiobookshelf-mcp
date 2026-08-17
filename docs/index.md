@@ -1,0 +1,103 @@
+---
+layout: home
+hero:
+  name: 'audiobookshelf-mcp'
+  text: 'Your audiobook library, in the conversation'
+  tagline: 'An MCP server for Audiobookshelf. Browse your libraries, ask what you own and what you have listened to, and keep progress, bookmarks, collections and playlists in sync.'
+  actions:
+    - theme: brand
+      text: Get started
+      link: /guide/getting-started
+    - theme: alt
+      text: Tools reference
+      link: /reference/tools
+    - theme: alt
+      text: GitHub
+      link: https://github.com/ni-c/audiobookshelf-mcp
+features:
+  - title: 44 tools, 29 of them read-only
+    details: Libraries, items, search, series, authors, chapters, podcast episodes, listening progress, statistics and sessions, bookmarks, collections and playlists — plus 15 write tools you can switch off entirely.
+  - title: Built for a model's context
+    details: An expanded library item carries every audio file, track and chapter with full ffprobe metadata. Every media response is a compact projection instead, with detail="full" when you really want the raw object.
+  - title: Safe by default
+    details: Destructive tools need a server-issued confirmation token, upstream content is marked untrusted, and read-only mode simply does not register the write tools.
+---
+
+<!-- SYNC: this inline SVG and public/architecture.svg show the same diagram.
+     The inline copy uses CSS variables so it follows the theme toggle; the
+     standalone file uses a prefers-color-scheme media query because README and
+     npm embed it as an image. Change both. -->
+
+<figure class="diagram">
+<svg viewBox="0 0 800 330" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">audiobookshelf-mcp architecture</title>
+  <desc id="arch-desc">An MCP client talks to audiobookshelf-mcp over stdio. The server exposes 29 read tools and 15 write tools, compacts every response, and calls the Audiobookshelf REST API over HTTPS with a bearer API key. Deleting requires a confirmation token.</desc>
+
+  <rect class="node" x="14" y="116" width="152" height="88" rx="9" />
+  <text class="label-title" x="90" y="150" text-anchor="middle">MCP client</text>
+  <text class="label-muted" x="90" y="170" text-anchor="middle">Claude Code · Desktop</text>
+  <text class="label-muted" x="90" y="186" text-anchor="middle">Codex · Inspector</text>
+
+  <line class="edge" x1="170" y1="160" x2="244" y2="160" marker-end="url(#arch-a)" />
+  <text class="label-mono" x="209" y="146" text-anchor="middle">stdio</text>
+  <text class="label-muted" x="209" y="180" text-anchor="middle">no port</text>
+
+  <rect class="node-accent" x="252" y="26" width="256" height="278" rx="11" />
+  <text class="label-title" x="380" y="52" text-anchor="middle">audiobookshelf-mcp</text>
+
+  <rect class="node" x="272" y="70" width="216" height="52" rx="7" />
+  <text x="380" y="90" text-anchor="middle">29 read tools</text>
+  <text class="label-muted" x="380" y="109" text-anchor="middle">libraries · items · progress · stats</text>
+
+  <rect class="node" x="272" y="134" width="216" height="52" rx="7" />
+  <text x="380" y="154" text-anchor="middle">15 write tools</text>
+  <text class="label-muted" x="380" y="173" text-anchor="middle">progress · bookmarks · collections</text>
+
+  <rect class="node" x="272" y="198" width="216" height="34" rx="7" />
+  <text class="label-muted" x="380" y="219" text-anchor="middle">deletes need a confirmation token</text>
+
+  <text class="label-mono" x="380" y="256" text-anchor="middle">READ_ONLY=true</text>
+  <text class="label-muted" x="380" y="275" text-anchor="middle">write tools are never registered</text>
+  <text class="label-muted" x="380" y="292" text-anchor="middle">every response compacted, lists capped</text>
+
+  <line class="edge-accent" x1="512" y1="160" x2="598" y2="160" marker-end="url(#arch-b)" />
+  <text class="label-mono" x="557" y="146" text-anchor="middle">HTTPS</text>
+  <text class="label-muted" x="557" y="180" text-anchor="middle">bearer API key</text>
+  <text class="label-muted" x="557" y="196" text-anchor="middle">no redirects</text>
+
+  <rect class="node" x="606" y="116" width="180" height="88" rx="9" />
+  <text class="label-title" x="696" y="150" text-anchor="middle">Audiobookshelf</text>
+  <text class="label-muted" x="696" y="170" text-anchor="middle">2.26.0 or newer</text>
+  <text class="label-muted" x="696" y="186" text-anchor="middle">your self-hosted server</text>
+
+  <defs>
+    <marker id="arch-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" />
+    </marker>
+    <marker id="arch-b" class="accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" />
+    </marker>
+  </defs>
+</svg>
+<figcaption>The server holds one Audiobookshelf API key and speaks stdio — it never listens on a port.</figcaption>
+</figure>
+
+## In one command
+
+```sh
+claude mcp add audiobookshelf \
+  -e AUDIOBOOKSHELF_URL=https://abs.example.com \
+  -e AUDIOBOOKSHELF_API_KEY=… \
+  -- npx -y audiobookshelf-mcp
+```
+
+Then ask things like *"what am I in the middle of?"*, *"do I own anything by
+Frank Schätzing?"*, *"how much did I listen to last month?"* or *"put the three
+unfinished ones in a playlist called Backlog"*.
+
+## What it does not do
+
+By design: no user management, no server settings, no backups, no cache purging,
+no filesystem browsing, no library or item deletion, no metadata rewriting, no
+file uploads — even when the API key would permit them. See
+[Security](/guide/security).
