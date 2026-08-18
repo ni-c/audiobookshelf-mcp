@@ -1,10 +1,8 @@
 # Changelog
 
-<!-- The include below starts at line 16 of CHANGELOG.md, which is where the
-     "## [Unreleased]" heading sits — the lines above it are the file's own header
-     and would be duplicated here. VitePress line-range includes fail SILENTLY when
-     the range no longer matches, so if you add lines to the top of CHANGELOG.md,
-     move this number and look at the rendered page. CHANGELOG.md carries a note
-     pointing back here. -->
-
-<!--@include: ../../CHANGELOG.md{16,}-->
+<!-- Included from CHANGELOG.md by name, not by line range: a range silently drops
+     whatever moved out of it, so growing the file's header would quietly delete the
+     newest release from this page while the build stays green. The markers live in
+     CHANGELOG.md as `#region changelog` / `#endregion changelog`, and the Docs
+     workflow asserts that the current version reaches the rendered page. -->
+<!--@include: ../../CHANGELOG.md#changelog-->
