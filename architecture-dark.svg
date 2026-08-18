@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GENERATED FILE — do not edit by hand.
+  Source: docs/assets/architecture.source.svg
+  Regenerate with: npm run assets
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 330" width="800" height="330" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">audiobookshelf-mcp architecture</title>
+  <desc id="arch-desc">An MCP client talks to audiobookshelf-mcp over stdio. The server exposes 29 read tools and 15 write tools, compacts every response, and calls the Audiobookshelf REST API over HTTPS with a bearer API key. Deleting requires a confirmation token.</desc>
+
+  <style>
+    .node { stroke-width: 1.25; }
+    .node-accent { stroke-width: 1.5; }
+    .edge { stroke-width: 1.5; fill: none; }
+    .edge-accent { stroke-width: 1.75; fill: none; }
+    .edge-dashed { stroke-dasharray: 5 4; }
+    text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif; font-size: 13px; }
+    .label-title { font-size: 13.5px; font-weight: 600; }
+    .label-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 12px; }
+    .label-muted { font-size: 11.5px; }
+
+    .node { fill: rgba(148, 163, 184, 0.10); stroke: #64748b; }
+    .node-accent { fill: rgba(129, 140, 248, 0.16); stroke: #a5b4fc; }
+    .edge { stroke: #64748b; }
+    .edge-accent { stroke: #a5b4fc; }
+    text { fill: #e2e8f0; }
+    .label-muted { fill: #94a3b8; }
+    marker path { fill: #64748b; stroke: none; }
+    marker.accent path { fill: #a5b4fc; }
+  </style>
+
+  <defs>
+    <marker id="arch-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" />
+    </marker>
+    <marker id="arch-b" class="accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" />
+    </marker>
+  </defs>
+
+  <rect class="node" x="14" y="116" width="152" height="88" rx="9" />
+  <text class="label-title" x="90" y="150" text-anchor="middle">MCP client</text>
+  <text class="label-muted" x="90" y="170" text-anchor="middle">Claude Code · Desktop</text>
+  <text class="label-muted" x="90" y="186" text-anchor="middle">Codex · Inspector</text>
+
+  <line class="edge" x1="170" y1="160" x2="244" y2="160" marker-end="url(#arch-a)" />
+  <text class="label-mono" x="209" y="146" text-anchor="middle">stdio</text>
+  <text class="label-muted" x="209" y="180" text-anchor="middle">no port</text>
+
+  <rect class="node-accent" x="252" y="26" width="256" height="278" rx="11" />
+  <text class="label-title" x="380" y="52" text-anchor="middle">audiobookshelf-mcp</text>
+
+  <rect class="node" x="272" y="70" width="216" height="52" rx="7" />
+  <text x="380" y="90" text-anchor="middle">29 read tools</text>
+  <text class="label-muted" x="380" y="109" text-anchor="middle">libraries · items · progress · stats</text>
+
+  <rect class="node" x="272" y="134" width="216" height="52" rx="7" />
+  <text x="380" y="154" text-anchor="middle">15 write tools</text>
+  <text class="label-muted" x="380" y="173" text-anchor="middle">progress · bookmarks · collections</text>
+
+  <rect class="node" x="272" y="198" width="216" height="34" rx="7" />
+  <text class="label-muted" x="380" y="219" text-anchor="middle">deletes need a confirmation token</text>
+
+  <text class="label-mono" x="380" y="256" text-anchor="middle">READ_ONLY=true</text>
+  <text class="label-muted" x="380" y="275" text-anchor="middle">write tools are never registered</text>
+  <text class="label-muted" x="380" y="292" text-anchor="middle">every response compacted, lists capped</text>
+
+  <line class="edge-accent" x1="512" y1="160" x2="598" y2="160" marker-end="url(#arch-b)" />
+  <text class="label-mono" x="557" y="146" text-anchor="middle">HTTPS</text>
+  <text class="label-muted" x="557" y="180" text-anchor="middle">bearer API key</text>
+  <text class="label-muted" x="557" y="196" text-anchor="middle">no redirects</text>
+
+  <rect class="node" x="606" y="116" width="180" height="88" rx="9" />
+  <text class="label-title" x="696" y="150" text-anchor="middle">Audiobookshelf</text>
+  <text class="label-muted" x="696" y="170" text-anchor="middle">2.26.0 or newer</text>
+  <text class="label-muted" x="696" y="186" text-anchor="middle">your self-hosted server</text>
+</svg>
