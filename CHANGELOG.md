@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
        include fails silently — update the number there too. -->
 <!-- Content starts on the next line; see the note above before inserting here. -->
 
-## [Unreleased]
+## [0.1.2] - 2026-08-18
 
 ### Fixed
 
