@@ -8,12 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Two things read this file mechanically:
      * The release workflow extracts the section of the version being tagged with
        awk, matching "## [x.y.z]". Keep that heading shape exactly.
-     * docs/reference/changelog.md includes everything from line 16 down (the
-       "## [Unreleased]" heading). Adding lines above it shifts that range and the
-       include fails silently — update the number there too. -->
-<!-- Content starts on the next line; see the note above before inserting here. -->
+     * docs/reference/changelog.md includes everything between the region markers
+       below, by name rather than by line range, so the header above can grow
+       freely. Keep the end marker last in the file, after the link definitions. -->
 
 <!-- #region changelog -->
+
+## [0.1.3] - 2026-08-18
+
+### Fixed
+
+- The API key is no longer left in the environment when `AUDIOBOOKSHELF_URL` is
+  unset. `loadConfig` deleted it only at the very end, behind the early return
+  for a missing URL, so in that state the key stayed in `process.env` for the
+  whole process lifetime — readable in `/proc/<pid>/environ` and inherited by
+  every child process. The deletion now happens before any branch.
+- A malformed `AUDIOBOOKSHELF_URL` is no longer echoed into the log. That branch
+  fires precisely when the variable does not hold a URL, which most often means
+  the API key was pasted into the wrong variable.
+- `http://[::1]:…` no longer produces the "plain http to a non-local host"
+  warning. `URL.hostname` keeps the brackets around an IPv6 literal, so the
+  loopback check never matched that notation.
 
 ## [0.1.2] - 2026-08-18
 

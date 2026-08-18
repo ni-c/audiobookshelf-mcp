@@ -44,6 +44,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const insecureTls = env.AUDIOBOOKSHELF_INSECURE_TLS === 'true';
   const readOnly = env.AUDIOBOOKSHELF_READ_ONLY === 'true';
 
+  // Don't keep the key in the environment for the process lifetime — it is
+  // visible to child processes and in /proc/<pid>/environ. This happens before
+  // any branch on purpose: the paths below either exit or return early, and
+  // "the URL is missing or malformed" is exactly the state in which someone
+  // runs an inspector or trips a crash reporter, so it is the last moment the
+  // key should still be sitting in the environment. Everything after this point
+  // reads the locals above, never `env` again.
+  delete env.AUDIOBOOKSHELF_API_KEY;
+
   const missing = [
     !url && 'AUDIOBOOKSHELF_URL',
     !apiKey && 'AUDIOBOOKSHELF_API_KEY',
@@ -61,8 +70,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   try {
     parsed = new URL(url);
   } catch {
+    // The value itself is not echoed: this branch fires precisely when the
+    // variable does not hold what was expected, and an API key pasted into the
+    // wrong environment variable would otherwise be printed verbatim into the
+    // MCP host's log.
     console.error(
-      `audiobookshelf-mcp: AUDIOBOOKSHELF_URL is not a valid URL: ${url}`
+      'audiobookshelf-mcp: AUDIOBOOKSHELF_URL is not a valid URL (e.g. https://abs.example.com)'
     );
     process.exit(1);
   }
@@ -86,25 +99,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
-  const config: Config = {
+  return {
     url: url.replace(/\/+$/, ''),
     apiKey,
     insecureTls,
     readOnly,
   };
-
-  // Don't keep the key in the environment for the process lifetime — it is
-  // visible to child processes and in /proc/<pid>/environ.
-  delete env.AUDIOBOOKSHELF_API_KEY;
-
-  return config;
 }
 
 function isLoopbackHost(hostname: string): boolean {
+  // URL.hostname keeps the brackets around an IPv6 literal, so comparing against
+  // a bare '::1' never matches and the plain-http warning fires on a loopback
+  // URL written as http://[::1]:13378.
+  const host = hostname.replace(/^\[|\]$/g, '');
   return (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.startsWith('127.') ||
-    hostname === '::1'
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.startsWith('127.') ||
+    host === '::1'
   );
 }
