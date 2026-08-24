@@ -7,6 +7,7 @@
 [![Container](https://img.shields.io/badge/ghcr.io-ni--c%2Faudiobookshelf--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/ni-c/audiobookshelf-mcp/pkgs/container/audiobookshelf-mcp)
 [![license](https://img.shields.io/npm/l/audiobookshelf-mcp)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-audiobookshelf--mcp.ni--c.de-4f46e5)](https://audiobookshelf-mcp.ni-c.de)
+[![Sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)
 
 An [MCP](https://modelcontextprotocol.io) server for
 [Audiobookshelf](https://www.audiobookshelf.org/), the self-hosted audiobook and
