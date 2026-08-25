@@ -1,6 +1,6 @@
 {
   "name": "audiobookshelf-mcp",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "mcpName": "io.github.ni-c/audiobookshelf-mcp",
   "description": "MCP server for Audiobookshelf, the self-hosted audiobook and podcast server",
   "keywords": [
