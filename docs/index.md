@@ -19,6 +19,8 @@ features:
     details: Libraries, items, search, series, authors, chapters, podcast episodes, listening progress, statistics and sessions, bookmarks, collections and playlists — plus 15 write tools you can switch off entirely.
   - title: Built for a model's context
     details: An expanded library item carries every audio file, track and chapter with full ffprobe metadata. Every media response is a compact projection instead, with detail="full" when you really want the raw object.
+  - title: Register only the tools you need
+    details: 'AUDIOBOOKSHELF_READ_ONLY=true registers the read tools and nothing else. AUDIOBOOKSHELF_ALLOW_TOOLS cuts finer — essential for a curated eight, your own comma-separated list, or a whole family with list_* — and AUDIOBOOKSHELF_DENY_TOOLS subtracts. Whatever is filtered out does not exist on the protocol rather than failing when called, and a name that matches no tool stops the server at startup instead of quietly going missing.'
   - title: Safe by default
     details: Destructive tools need a server-issued confirmation token, upstream content is marked untrusted, and read-only mode simply does not register the write tools.
 ---

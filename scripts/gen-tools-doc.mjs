@@ -21,6 +21,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { createServer } from '../dist/server.js';
+import { ESSENTIAL_TOOLS } from '../dist/tools/catalogue.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const target = join(root, 'docs', 'reference', 'tools.md');
@@ -87,9 +88,12 @@ function renderTool(tool) {
     : tool.annotations?.destructiveHint
       ? 'write, destructive'
       : 'write';
+  // Generated from the same constant the filter reads, so "which tools does
+  // `essential` select" cannot be written down twice and drift.
+  const preset = ESSENTIAL_TOOLS.includes(tool.name) ? ', **essential**' : '';
 
   const lines = [`### \`${tool.name}\``, ''];
-  if (tool.title) lines.push(`**${tool.title}** — ${kind}`, '');
+  if (tool.title) lines.push(`**${tool.title}** — ${kind}${preset}`, '');
   lines.push(escapeCell(tool.description), '');
 
   const properties = tool.inputSchema?.properties ?? {};
@@ -130,6 +134,11 @@ function render(tools) {
     '',
     `All ${tools.length} tools: ${read.length} read, ${write.length} write.`,
     'With `AUDIOBOOKSHELF_READ_ONLY=true` the write tools are not registered at all.',
+    '',
+    `All ${tools.length} are registered unless you say otherwise. \`AUDIOBOOKSHELF_ALLOW_TOOLS\``,
+    'and `AUDIOBOOKSHELF_DENY_TOOLS` narrow the list to the ones you want, and',
+    `\`AUDIOBOOKSHELF_ALLOW_TOOLS=essential\` selects the ${ESSENTIAL_TOOLS.length} marked **essential**`,
+    'below — see [choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).',
     '',
     'Every tool that returns media accepts `detail` — `"compact"` (the default)',
     'returns a projection with the fields that matter for browsing, `"full"`',

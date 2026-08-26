@@ -60,3 +60,28 @@ Prefer adding your CA to the system trust store.
 | Error body cap    | 2000 chars     |
 | Confirm-token TTL | 5 minutes      |
 | Pending tokens    | max 100        |
+
+## Narrowing the tool list
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `AUDIOBOOKSHELF_ALLOW_TOOLS` | no | Tool names, `list_*` prefixes or `essential`; only these register |
+| `AUDIOBOOKSHELF_DENY_TOOLS` | no | Same syntax; subtracted from whatever the allow list left |
+
+Both are comma-separated. Each entry is either an exact tool name or a prefix with
+a single trailing `*`. Entries are trimmed and matched case-insensitively; empty
+entries are ignored, and a value that is empty or only whitespace counts as unset —
+`AUDIOBOOKSHELF_ALLOW_TOOLS=` in a compose file does not mean "allow nothing".
+`essential` is recognised only in the allow list, and selects `list_libraries`, `search_library`, `list_library_items`, `get_library_item`, `get_item_chapters`, `list_items_in_progress`, `get_media_progress`, `set_media_progress`.
+
+**An entry that matches no tool aborts startup**, naming the entry and listing the
+valid names, as does a malformed pattern such as `*_x` or `list_*_x`. The
+alternative — ignoring the entry — leaves a tool missing from `tools/list` with
+nothing pointing at the cause. If both lists together remove everything, the server
+refuses to start rather than offering an empty tool list.
+
+Under `AUDIOBOOKSHELF_READ_ONLY`, an exact write-tool name in the allow list is an
+error naming the read-only setting rather than "unknown tool"; a pattern covering
+write tools is accepted and merely contributes nothing, with a warning on stderr.
+Deny entries are exempt: denying an already-suppressed tool is how a defensive
+list is written.
