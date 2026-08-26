@@ -9,6 +9,11 @@
 All 44 tools: 29 read, 15 write.
 With `AUDIOBOOKSHELF_READ_ONLY=true` the write tools are not registered at all.
 
+All 44 are registered unless you say otherwise. `AUDIOBOOKSHELF_ALLOW_TOOLS`
+and `AUDIOBOOKSHELF_DENY_TOOLS` narrow the list to the ones you want, and
+`AUDIOBOOKSHELF_ALLOW_TOOLS=essential` selects the 8 marked **essential**
+below — see [choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).
+
 Every tool that returns media accepts `detail` — `"compact"` (the default)
 returns a projection with the fields that matter for browsing, `"full"`
 returns the raw Audiobookshelf object, which is very large.
@@ -17,7 +22,7 @@ returns the raw Audiobookshelf object, which is very large.
 
 ### `list_libraries`
 
-**List libraries** — read-only
+**List libraries** — read-only, **essential**
 
 Lists the Audiobookshelf libraries the API key’s user can access, with their id, name and media type (book or podcast). Start here — every other library tool needs a library id.
 
@@ -58,7 +63,7 @@ Returns the values that can be filtered on in this library: authors, genres, tag
 
 ### `list_library_items`
 
-**List library items** — read-only
+**List library items** — read-only, **essential**
 
 Lists items (books or podcasts) of a library, paginated, sortable and filterable. Use get_library_filter_data first to learn the valid filter values. Filter groups — valued (need filter_value): genres, tags, series, authors, progress, narrators, publishers, publishedDecades, missing, languages, tracks, ebooks; standalone: issues, feed-open, share-open, recent.
 
@@ -76,7 +81,7 @@ Lists items (books or podcasts) of a library, paginated, sortable and filterable
 
 ### `search_library`
 
-**Search a library** — read-only
+**Search a library** — read-only, **essential**
 
 Full-text search within one library. Matches books, podcasts, series, authors, narrators and tags. Use this for "do I own X?" questions; use list_library_items with a filter for "show me all X" questions.
 
@@ -175,7 +180,7 @@ Takes no parameters.
 
 ### `get_library_item`
 
-**Get library item** — read-only
+**Get library item** — read-only, **essential**
 
 Fetches one book or podcast including its metadata, tags and the listening progress of the API key’s user. Chapters, audio files and tracks are not part of the compact projection — use get_item_chapters for chapters, or detail="full" for everything.
 
@@ -186,7 +191,7 @@ Fetches one book or podcast including its metadata, tags and the listening progr
 
 ### `get_item_chapters`
 
-**Get item chapters** — read-only
+**Get item chapters** — read-only, **essential**
 
 Returns the chapter list of a book with start and end times in seconds. Separate from get_library_item because long audiobooks can have hundreds of chapters.
 
@@ -231,7 +236,7 @@ Returns the Audiobookshelf user the API key acts on behalf of, with their permis
 
 ### `list_items_in_progress`
 
-**List items in progress** — read-only
+**List items in progress** — read-only, **essential**
 
 The items the user has started but not finished, newest first — the "Continue Listening" list across all libraries. The entries carry progressLastUpdate but not the position itself; use get_media_progress for that. For podcasts, recentEpisode names the episode in progress.
 
@@ -242,7 +247,7 @@ The items the user has started but not finished, newest first — the "Continue 
 
 ### `get_media_progress`
 
-**Get media progress** — read-only
+**Get media progress** — read-only, **essential**
 
 The listening progress of the current user for one book or podcast episode: position, percentage and whether it is finished. Returns a 404 error when the item has never been started.
 
@@ -343,7 +348,7 @@ Fetches one playlist with its entries, in order.
 
 ### `set_media_progress`
 
-**Set media progress** — write
+**Set media progress** — write, **essential**
 
 Creates or updates the listening progress of the API key’s user for one book or podcast episode. Set is_finished=true to mark it as finished, is_finished=false to reopen it (which resets the position to 0), or current_time to jump to a position in seconds. Audiobookshelf also marks an item finished on its own once less than ten seconds remain.
 

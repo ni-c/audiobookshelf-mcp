@@ -9,7 +9,15 @@ export interface Config {
   url: string | undefined;
   apiKey: string | undefined;
   insecureTls: boolean;
-  readOnly: boolean;
+  readOnly: boolean; /**
+   * Raw value of `AUDIOBOOKSHELF_ALLOW_TOOLS` — comma-separated tool names, `list_*`
+   * prefixes, or `essential`. Kept unparsed on purpose: this file is a mirror of
+   * the environment, and the names can only be checked against the tool
+   * catalogue, which `buildToolFilter` does.
+   */
+  allowTools: string | undefined;
+  /** Raw value of `AUDIOBOOKSHELF_DENY_TOOLS`, same shape, subtracted from the above. */
+  denyTools: string | undefined;
 }
 
 /** Shown when the configuration is incomplete — at startup and on every API call. */
@@ -45,6 +53,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const apiKey = env.AUDIOBOOKSHELF_API_KEY;
   const insecureTls = env.AUDIOBOOKSHELF_INSECURE_TLS === 'true';
   const readOnly = env.AUDIOBOOKSHELF_READ_ONLY === 'true';
+  const allowTools = env.AUDIOBOOKSHELF_ALLOW_TOOLS;
+  const denyTools = env.AUDIOBOOKSHELF_DENY_TOOLS;
 
   // Don't keep the key in the environment for the process lifetime — it is
   // visible to child processes and in /proc/<pid>/environ. This happens before
@@ -65,7 +75,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   if (!url) {
-    return { url: undefined, apiKey, insecureTls, readOnly };
+    return {
+      url: undefined,
+      apiKey,
+      insecureTls,
+      readOnly,
+      allowTools,
+      denyTools,
+    };
   }
 
   let parsed: URL;
@@ -106,6 +123,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiKey,
     insecureTls,
     readOnly,
+    allowTools,
+    denyTools,
   };
 }
 

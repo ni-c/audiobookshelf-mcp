@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { AudiobookshelfApi } from './api.js';
+import { buildToolFilter, installToolFilter } from './tool-filter.js';
 import type { Config } from './config.js';
 import { ConfirmationStore } from './confirm.js';
 import {
@@ -32,6 +33,10 @@ function packageVersion(): string {
 }
 
 export function createServer(config: Config): McpServer {
+  // Before anything is built: an unusable tool list should fail on the
+  // way in, not leave a server running with tools quietly missing.
+  const filter = buildToolFilter(config);
+
   const api = new AudiobookshelfApi(config);
   const confirmations = new ConfirmationStore();
 
@@ -39,6 +44,10 @@ export function createServer(config: Config): McpServer {
     name: 'audiobookshelf-mcp',
     version: packageVersion(),
   });
+
+  // Wraps server.registerTool, so it has to sit before the first
+  // register call and does not care how they are organised.
+  installToolFilter(server, filter);
 
   registerLibraryReadTools(server, api);
   registerItemReadTools(server, api);

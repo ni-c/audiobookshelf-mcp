@@ -18,6 +18,11 @@ answer questions about what you own and what you have listened to, and — unles
 switch it off — keep your listening progress, bookmarks, collections and playlists up
 to date: 44 tools, 29 read and 15 write.
 
+Forty-four tools is the ceiling, not the floor: `AUDIOBOOKSHELF_ALLOW_TOOLS=essential`
+registers a curated eight instead, and a model picks the right tool far more
+reliably from eight than from forty-four — see
+[choosing which tools load](#choosing-which-tools-load).
+
 <!-- <picture> is resolved against the colour scheme of the page showing it, so GitHub
      picks the variant that matches its own theme toggle. npm strips <picture> and
      <source> when it sanitises the README and keeps the <img>, which is why that
@@ -52,10 +57,34 @@ once, at creation.
 | `AUDIOBOOKSHELF_API_KEY`      | yes      | API key, sent as `Authorization: Bearer …`                                              |
 | `AUDIOBOOKSHELF_READ_ONLY`    | no       | `true` registers only the 29 read tools                                                 |
 | `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `true` accepts self-signed certificates — scoped to this connection, not process-wide   |
+| `AUDIOBOOKSHELF_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset      |
+| `AUDIOBOOKSHELF_DENY_TOOLS`   | no       | Same syntax; removed from whatever `AUDIOBOOKSHELF_ALLOW_TOOLS` left                    |
 
 The server starts without configuration: it completes the MCP handshake and lists
 its tools, and every call then fails with the setup instructions. That is
 deliberate, so registries and sandbox inspectors can introspect it.
+
+### Choosing which tools load
+
+`AUDIOBOOKSHELF_ALLOW_TOOLS` and `AUDIOBOOKSHELF_DENY_TOOLS` take comma-separated tool names;
+a trailing `*` matches a whole family. `essential` is a curated preset of
+eight: `list_libraries`, `search_library`, `list_library_items`, `get_library_item`, `get_item_chapters`, `list_items_in_progress`, `get_media_progress`, `set_media_progress`.
+
+```sh
+AUDIOBOOKSHELF_ALLOW_TOOLS=essential
+AUDIOBOOKSHELF_ALLOW_TOOLS=search_library,get_library_item,set_media_progress
+AUDIOBOOKSHELF_DENY_TOOLS=delete_*
+```
+
+An entry that matches no tool aborts startup and names it, so a typo cannot
+silently hide a tool — an absent tool is not something anyone traces back to an
+environment variable. A filtered tool is never registered, so it is absent from
+`tools/list` and unknown to `tools/call` alike, exactly like a write tool under
+`AUDIOBOOKSHELF_READ_ONLY`.
+
+If you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de)
+is the other answer — its `/hub` endpoint replaces every server's tools with six
+meta-tools.
 
 ## Install
 
