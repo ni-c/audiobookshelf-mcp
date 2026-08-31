@@ -58,7 +58,7 @@ hand-written and needs updating separately.
   hatch, and a list tool needs a cap and a note saying how to page on.
 - **No new runtime dependencies** without a very good reason; the small tree is a
   feature.
-- Run `npm run lint` before pushing — it checks both eslint and prettier, and prettier
+- Run `npm run lint` before pushing — it checks both oxlint and prettier, and prettier
   also validates the YAML, JSON and Markdown files.
 
 ## Questions and bugs

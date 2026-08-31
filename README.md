@@ -238,7 +238,7 @@ when it happens.
 
 ```sh
 npm install
-npm run lint          # eslint + prettier --check
+npm run lint          # oxlint + prettier --check
 npm run build         # tsc
 npm test              # vitest
 npm run test:coverage # with thresholds
