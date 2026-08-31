@@ -1,15 +1,11 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   describeFilterGroups,
   encodeFilter,
   FILTER_GROUPS,
   PROGRESS_FILTER_VALUES,
 } from '../filters.js';
-import { jsonResult, run, untrustedJsonResult } from '../result.js';
 import {
   detailParam,
   libraryIdParam,
@@ -24,6 +20,9 @@ import {
   compactSeries,
   listFrom,
 } from '../shape.js';
+
+import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { jsonResult, run, untrustedJsonResult } from '../result.js';
 
 const DEFAULT_ITEM_LIMIT = 25;
 const DEFAULT_SEARCH_LIMIT = 12;
@@ -50,9 +49,9 @@ export function registerLibraryReadTools(
         'Lists the Audiobookshelf libraries the API key’s user can access, with ' +
         'their id, name and media type (book or podcast). Start here — every ' +
         'other library tool needs a library id.',
-      inputSchema: {
+      inputSchema: z.object({
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ detail }) =>
@@ -74,10 +73,10 @@ export function registerLibraryReadTools(
       title: 'Get library',
       description:
         'Fetches a single library including its folders and scanner settings.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, detail }) =>
@@ -99,9 +98,9 @@ export function registerLibraryReadTools(
       description:
         'Statistics for one library: number of items, authors and genres, total ' +
         'duration and size, longest and largest items.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id }) =>
@@ -121,9 +120,9 @@ export function registerLibraryReadTools(
         'Returns the values that can be filtered on in this library: authors, ' +
         'genres, tags, series, narrators, languages and publishers, each with ' +
         'the id or name to pass to list_library_items as filter_value.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id }) =>
@@ -143,7 +142,7 @@ export function registerLibraryReadTools(
         'Lists items (books or podcasts) of a library, paginated, sortable and ' +
         'filterable. Use get_library_filter_data first to learn the valid ' +
         `filter values. Filter groups — ${describeFilterGroups()}.`,
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         page: pageParam,
         limit: limitParam(DEFAULT_ITEM_LIMIT),
@@ -174,7 +173,7 @@ export function registerLibraryReadTools(
           .optional()
           .describe('Collapse books of the same series into one entry'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({
@@ -234,12 +233,12 @@ export function registerLibraryReadTools(
         'Full-text search within one library. Matches books, podcasts, series, ' +
         'authors, narrators and tags. Use this for "do I own X?" questions; use ' +
         'list_library_items with a filter for "show me all X" questions.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         q: z.string().min(1).describe('Search query'),
         limit: limitParam(DEFAULT_SEARCH_LIMIT),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, q, limit, detail }) =>
@@ -291,11 +290,11 @@ export function registerLibraryReadTools(
         'The shelves of the Audiobookshelf home screen for this user: Continue ' +
         'Listening, Continue Series, Recently Added, Newest Episodes, Listen ' +
         'Again and so on. The fastest answer to "what am I listening to right now?".',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         limit: limitParam(10),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, limit, detail }) =>
@@ -339,7 +338,7 @@ export function registerLibraryReadTools(
         'Lists the series of a book library with their number of books and total ' +
         'duration. To list the books of one series, call list_library_items with ' +
         'filter_group="series" and filter_value=<series id>.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         page: pageParam,
         limit: limitParam(DEFAULT_ITEM_LIMIT),
@@ -350,7 +349,7 @@ export function registerLibraryReadTools(
           .describe('Sort key, e.g. name, numBooks, addedAt, totalDuration'),
         descending: z.boolean().optional().describe('Reverse the sort order'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, page, limit, sort, descending, detail }) =>
@@ -386,10 +385,10 @@ export function registerLibraryReadTools(
         'Fetches a single series by id, including its books. To list the books ' +
         'with paging and sorting, use list_library_items with ' +
         'filter_group="series" instead.',
-      inputSchema: {
+      inputSchema: z.object({
         series_id: z.string().min(1).describe('Series id'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ series_id, detail }) =>
@@ -411,10 +410,10 @@ export function registerLibraryReadTools(
         'Lists all authors of a book library with their number of books. To list ' +
         'the books of one author, call list_library_items with ' +
         'filter_group="authors" and filter_value=<author id>.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: libraryIdParam,
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, detail }) =>
@@ -440,7 +439,7 @@ export function registerLibraryReadTools(
       description:
         'Fetches a single author, optionally with the library items attributed ' +
         'to them.',
-      inputSchema: {
+      inputSchema: z.object({
         author_id: z.string().min(1).describe('Author id'),
         include_items: z
           .boolean()
@@ -452,7 +451,7 @@ export function registerLibraryReadTools(
           .optional()
           .describe('Restrict the returned items to this library'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ author_id, include_items, library_id, detail }) =>
@@ -482,7 +481,7 @@ export function registerLibraryReadTools(
       description:
         'Lists all tags used on the server, across libraries. Tags are the ' +
         'user-defined labels on library items.',
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () => run(async () => untrustedJsonResult(await api.get('/api/tags')))
@@ -495,7 +494,7 @@ export function registerLibraryReadTools(
       description:
         'Lists all genres used on the server, across libraries. Genres come from ' +
         'the media metadata, not from the user.',
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () =>
@@ -510,7 +509,7 @@ export function registerLibraryReadTools(
         'Version and initialization state of the Audiobookshelf server. Useful ' +
         'to check connectivity and whether the server is new enough for API keys ' +
         '(2.26.0 or later).',
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () => run(async () => jsonResult(await api.get('/status')))

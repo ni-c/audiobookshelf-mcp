@@ -1,8 +1,5 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   confirmationPrompt,
   setResourceKey,
@@ -14,6 +11,8 @@ import {
   textResult,
   untrustedJsonResult,
 } from '../result.js';
+
+import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { confirmTokenParam, detailParam } from '../schema.js';
 import { compactPlaylist, listFrom } from '../shape.js';
 
@@ -70,14 +69,14 @@ export function registerPlaylistReadTools(
         'the playlists of every accessible library. Playlists are private per ' +
         'user and can hold books or podcast episodes; collections are shared ' +
         'server-wide and hold books only.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
           .optional()
           .describe('Restrict the result to this library'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, detail }) =>
@@ -100,10 +99,10 @@ export function registerPlaylistReadTools(
     {
       title: 'Get playlist',
       description: 'Fetches one playlist with its entries, in order.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ playlist_id, detail }) =>
@@ -130,7 +129,7 @@ export function registerPlaylistWriteTools(
       description:
         'Creates a playlist for the API key’s user. Unlike a collection it may ' +
         'start out empty and it may hold podcast episodes.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
@@ -144,7 +143,7 @@ export function registerPlaylistWriteTools(
         items: playlistItemsParam
           .optional()
           .describe('Initial entries, optional'),
-      },
+      }),
     },
     async ({ library_id, name, description, items }) =>
       run(async () => {
@@ -168,7 +167,7 @@ export function registerPlaylistWriteTools(
         'that should stay — use add_items_to_playlist and ' +
         'remove_items_from_playlist to change membership. The library of a ' +
         'playlist cannot be changed.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         name: z.string().min(1).max(255).optional().describe('New name'),
         description: z
@@ -179,7 +178,7 @@ export function registerPlaylistWriteTools(
         items: playlistItemsParam
           .optional()
           .describe('Complete, newly ordered list of entries'),
-      },
+      }),
     },
     async ({ playlist_id, name, description, items }) =>
       run(async () => {
@@ -212,10 +211,10 @@ export function registerPlaylistWriteTools(
         'Appends books or podcast episodes to a playlist. All entries must come ' +
         'from the playlist’s library and match its kind — a podcast playlist ' +
         'needs an episode_id on every entry, a book playlist on none.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
-      },
+      }),
     },
     async ({ playlist_id, items }) =>
       run(async () => {
@@ -236,10 +235,10 @@ export function registerPlaylistWriteTools(
         'entries can be added back with add_items_to_playlist. Note that ' +
         'Audiobookshelf deletes a playlist automatically once its last entry is ' +
         'removed.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ playlist_id, items }) =>
@@ -274,10 +273,10 @@ export function registerPlaylistWriteTools(
         'Deletes a playlist. The media stays in the library. Two-step: the first ' +
         'call returns a confirmation token, the second call with that token ' +
         'performs the deletion.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         confirm_token: confirmTokenParam,
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ playlist_id, confirm_token }) =>

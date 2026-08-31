@@ -1,18 +1,9 @@
 import { createRequire } from 'node:module';
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { AudiobookshelfApi } from './api.js';
-import { buildToolFilter, installToolFilter } from './tool-filter.js';
-import type { Config } from './config.js';
-import { ConfirmationStore } from './confirm.js';
+import { McpServer } from '@modelcontextprotocol/server';
 import {
   registerCollectionReadTools,
   registerCollectionWriteTools,
 } from './tools/collections.js';
-import { registerItemReadTools } from './tools/items.js';
-import { registerLibraryReadTools } from './tools/libraries.js';
-import { registerMeReadTools } from './tools/me.js';
 import {
   registerPlaylistReadTools,
   registerPlaylistWriteTools,
@@ -21,6 +12,14 @@ import {
   registerBookmarkWriteTools,
   registerProgressWriteTools,
 } from './tools/progress.js';
+
+import { AudiobookshelfApi } from './api.js';
+import { buildToolFilter, installToolFilter } from './tool-filter.js';
+import type { Config } from './config.js';
+import { ConfirmationStore } from './confirm.js';
+import { registerItemReadTools } from './tools/items.js';
+import { registerLibraryReadTools } from './tools/libraries.js';
+import { registerMeReadTools } from './tools/me.js';
 
 function packageVersion(): string {
   try {

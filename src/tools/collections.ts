@@ -1,8 +1,5 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   confirmationPrompt,
   setResourceKey,
@@ -14,6 +11,8 @@ import {
   textResult,
   untrustedJsonResult,
 } from '../result.js';
+
+import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { confirmTokenParam, detailParam } from '../schema.js';
 import { compactCollection, listFrom } from '../shape.js';
 
@@ -40,14 +39,14 @@ export function registerCollectionReadTools(
         'Lists collections — the curated, ordered groups of books. Without ' +
         'library_id it returns the collections of every accessible library. ' +
         'Collections are shared server-wide; playlists are private per user.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
           .optional()
           .describe('Restrict the result to this library'),
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ library_id, detail }) =>
@@ -73,10 +72,10 @@ export function registerCollectionReadTools(
       title: 'Get collection',
       description:
         'Fetches one collection with the books it contains, in order.',
-      inputSchema: {
+      inputSchema: z.object({
         collection_id: collectionIdParam,
         detail: detailParam,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ collection_id, detail }) =>
@@ -104,7 +103,7 @@ export function registerCollectionWriteTools(
         'Creates a collection of books. Audiobookshelf rejects empty ' +
         'collections, so at least one library item id is required, and every ' +
         'item must be a book from the given library.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
@@ -116,7 +115,7 @@ export function registerCollectionWriteTools(
           .optional()
           .describe('Optional description'),
         library_item_ids: libraryItemIdsParam,
-      },
+      }),
     },
     async ({ library_id, name, description, library_item_ids }) =>
       run(async () => {
@@ -143,7 +142,7 @@ export function registerCollectionWriteTools(
         'every item that should stay in the collection — use ' +
         'add_books_to_collection and remove_books_from_collection to change ' +
         'membership.',
-      inputSchema: {
+      inputSchema: z.object({
         collection_id: collectionIdParam,
         name: z.string().min(1).max(255).optional().describe('New name'),
         description: z
@@ -159,7 +158,7 @@ export function registerCollectionWriteTools(
           .describe(
             'Complete, newly ordered list of the books in the collection'
           ),
-      },
+      }),
     },
     async ({ collection_id, name, description, library_item_ids }) =>
       run(async () => {
@@ -197,10 +196,10 @@ export function registerCollectionWriteTools(
       description:
         'Adds one or more books to an existing collection. Books already in the ' +
         'collection are ignored; books from a different library are rejected.',
-      inputSchema: {
+      inputSchema: z.object({
         collection_id: collectionIdParam,
         library_item_ids: libraryItemIdsParam,
-      },
+      }),
     },
     async ({ collection_id, library_item_ids }) =>
       run(async () => {
@@ -224,10 +223,10 @@ export function registerCollectionWriteTools(
         'Removes books from a collection. The books themselves are untouched — ' +
         'only their membership in the collection ends, and it can be restored ' +
         'with add_books_to_collection.',
-      inputSchema: {
+      inputSchema: z.object({
         collection_id: collectionIdParam,
         library_item_ids: libraryItemIdsParam,
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ collection_id, library_item_ids }) =>
@@ -253,10 +252,10 @@ export function registerCollectionWriteTools(
         'list and its order are gone. Two-step: the first call returns a ' +
         'confirmation token, the second call with that token performs the ' +
         'deletion. Requires an Audiobookshelf account with delete permission.',
-      inputSchema: {
+      inputSchema: z.object({
         collection_id: collectionIdParam,
         confirm_token: confirmTokenParam,
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ collection_id, confirm_token }) =>

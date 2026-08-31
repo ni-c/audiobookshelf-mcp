@@ -9,8 +9,8 @@
  * token and deletes nothing — so it is safe to point at any instance. Requires
  * `npm run build` and at least one collection to exist for the third beat.
  */
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { Client } from "@modelcontextprotocol/client";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BEAT = Number(process.env.DEMO_BEAT_MS ?? 1400);

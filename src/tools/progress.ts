@@ -1,13 +1,12 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   confirmationPrompt,
   setResourceKey,
   type ConfirmationStore,
 } from '../confirm.js';
+
+import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { errorResult, run, textResult } from '../result.js';
 import { confirmTokenParam, libraryItemIdParam } from '../schema.js';
 
@@ -34,7 +33,7 @@ export function registerProgressWriteTools(
         'is_finished=false to reopen it (which resets the position to 0), or ' +
         'current_time to jump to a position in seconds. Audiobookshelf also marks ' +
         'an item finished on its own once less than ten seconds remain.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         episode_id: episodeIdParam,
         current_time: z
@@ -62,7 +61,7 @@ export function registerProgressWriteTools(
             'Hide the item from the "Continue Listening" shelf without changing ' +
               'its position'
           ),
-      },
+      }),
     },
     async ({
       library_item_id,
@@ -126,7 +125,7 @@ export function registerProgressWriteTools(
         'Takes the media progress id (field "id" of get_media_progress), not the ' +
         'library item id. Two-step: the first call returns a confirmation token, ' +
         'the second call with that token performs the deletion.',
-      inputSchema: {
+      inputSchema: z.object({
         media_progress_id: z
           .string()
           .min(1)
@@ -134,7 +133,7 @@ export function registerProgressWriteTools(
             'Media progress id, from the "id" field of get_media_progress'
           ),
         confirm_token: confirmTokenParam,
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ media_progress_id, confirm_token }) =>
@@ -181,14 +180,14 @@ export function registerBookmarkWriteTools(
         'Creates a bookmark at a position of a book for the API key’s user. The ' +
         'position in seconds is the bookmark’s identity — a second bookmark at ' +
         'the same second is rejected.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds where the bookmark is placed'),
         title: z.string().min(1).max(255).describe('Bookmark title'),
-      },
+      }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -209,14 +208,14 @@ export function registerBookmarkWriteTools(
       description:
         'Renames the bookmark at a given position. The position itself cannot be ' +
         'changed — delete the bookmark and create a new one for that.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
         title: z.string().min(1).max(255).describe('New bookmark title'),
-      },
+      }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -237,13 +236,13 @@ export function registerBookmarkWriteTools(
       description:
         'Deletes the bookmark at a given position. No confirmation token: a ' +
         'bookmark is a position and a title, and create_bookmark restores it.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
-      },
+      }),
       annotations: { destructiveHint: true },
     },
     async ({ library_item_id, time }) =>
