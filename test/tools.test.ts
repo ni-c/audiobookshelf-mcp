@@ -148,8 +148,11 @@ const READ_CALLS: [string, Record<string, unknown>, string][] = [
   ['get_listening_stats', {}, '/api/me/listening-stats'],
   ['get_year_stats', { year: 2026 }, '/api/me/stats/year/2026'],
   ['list_listening_sessions', {}, '/api/me/listening-sessions'],
-  ['list_bookmarks', {}, '/api/me/bookmarks'],
-  ['list_bookmarks', { library_item_id: 'li_1' }, '/api/me/bookmarks/li_1'],
+  // Both read /api/me: Audiobookshelf has no bookmarks endpoint, and the
+  // filtering by library item happens in this server. Verified against 2.29.0,
+  // where /api/me/bookmarks is a 404 with or without an id after it.
+  ['list_bookmarks', {}, '/api/me'],
+  ['list_bookmarks', { library_item_id: 'li_1' }, '/api/me'],
   ['list_collections', {}, '/api/collections'],
   [
     'list_collections',
@@ -922,5 +925,50 @@ describe('write tool edge cases', () => {
       name: 'Y',
       items: [],
     });
+  });
+});
+
+describe('list_bookmarks', () => {
+  // Audiobookshelf has no bookmarks endpoint: `/api/me/bookmarks` is a 404
+  // with or without an item id after it, verified against 2.29.0. Bookmarks
+  // are a field on the account, so the filtering happens here — which means it
+  // has to be tested here too.
+  const ME = {
+    id: 'u_1',
+    username: 'reader',
+    bookmarks: [
+      { libraryItemId: 'li_1', title: 'First', time: 12 },
+      { libraryItemId: 'li_2', title: 'Second', time: 34 },
+      { libraryItemId: 'li_1', title: 'Third', time: 56 },
+    ],
+  };
+
+  it('returns every bookmark of the account when no item is given', async () => {
+    mockFetch(ME);
+    const client = await connect();
+    const result = payload(
+      await client.callTool({ name: 'list_bookmarks', arguments: {} })
+    ) as { numBookmarks: number };
+    expect(result.numBookmarks).toBe(3);
+  });
+
+  it('filters by library item, without asking the server to', async () => {
+    const spy = mockFetch(ME);
+    const client = await connect();
+    const result = payload(
+      await client.callTool({
+        name: 'list_bookmarks',
+        arguments: { library_item_id: 'li_1' },
+      })
+    ) as { numBookmarks: number; bookmarks: { title: string }[] };
+
+    expect(result.numBookmarks).toBe(2);
+    expect(result.bookmarks.map((b) => b.title)).toEqual(['First', 'Third']);
+    // The request that fetched the bookmarks is /api/me, and it does not
+    // carry the item id — the per-item route it would otherwise use does not
+    // exist upstream.
+    const bookmarkCall = callsOf(spy).at(-1)!;
+    expect(bookmarkCall.url).toContain('/api/me');
+    expect(bookmarkCall.url).not.toContain('li_1');
   });
 });

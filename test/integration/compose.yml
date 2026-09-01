@@ -1,0 +1,28 @@
+# Throwaway Audiobookshelf for `npm run test:integration`.
+#
+# Not a managed stack: brought up over the committed library fixture, filled by
+# test/integration/bootstrap.ts, and destroyed with `down -v` afterwards. The
+# suite calls every tool in the catalogue, deletes included, so nothing here may
+# be a library anybody listens to.
+#
+# Bound to 127.0.0.1 only.
+services:
+  audiobookshelf:
+    # Overridable so the weekly CI run can point at :latest and report drift
+    # without changing what the PR gate tests. Not older than 2.26.0: API keys
+    # arrived there, and before it the only credential is a login token with a
+    # different lifetime and a different header.
+    image: ${AUDIOBOOKSHELF_IMAGE:-ghcr.io/advplyr/audiobookshelf:2.29.0}
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # Two audiobooks of silence, about 24 kB, committed as a fixture. A
+      # library cannot be created empty and then filled through the API:
+      # Audiobookshelf scans a directory, so there has to be one.
+      - ./audiobooks:/audiobooks:ro
+    tmpfs:
+      # Config and metadata live for the length of one run.
+      - /config
+      - /metadata
+    ports:
+      - '127.0.0.1:13378:80'

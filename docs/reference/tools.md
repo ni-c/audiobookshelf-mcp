@@ -304,7 +304,7 @@ The playback sessions of the current user, newest first — each entry is one li
 
 **List bookmarks** — read-only
 
-The bookmarks of the current user — either all of them, or those of one library item. A bookmark is a named position in seconds.
+The bookmarks of the current user — either all of them, or those of one library item. A bookmark is a named position in seconds. Audiobookshelf has no bookmarks endpoint: they are a field on the account, so this reads /api/me and filters here. That is why there is no pagination — you get all of them.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

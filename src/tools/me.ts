@@ -196,7 +196,10 @@ export function registerMeReadTools(
       title: 'List bookmarks',
       description:
         'The bookmarks of the current user — either all of them, or those of one ' +
-        'library item. A bookmark is a named position in seconds.',
+        'library item. A bookmark is a named position in seconds.\n\n' +
+        'Audiobookshelf has no bookmarks endpoint: they are a field on the ' +
+        'account, so this reads /api/me and filters here. That is why there is ' +
+        'no pagination — you get all of them.',
       inputSchema: z.object({
         library_item_id: z
           .string()
@@ -211,12 +214,19 @@ export function registerMeReadTools(
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
-        const path =
+        // `/api/me/bookmarks` does not exist — verified against 2.29.0, it is
+        // a 404 whether or not an item id follows it. Bookmarks are a field on
+        // the account object, so the filtering happens here.
+        const data = await api.get('/api/me');
+        const all = listFrom(data, 'bookmarks');
+        const bookmarks =
           library_item_id === undefined
-            ? '/api/me/bookmarks'
-            : `/api/me/bookmarks/${assertPathSegment(library_item_id, 'library_item_id')}`;
-        const data = await api.get(path);
-        const bookmarks = listFrom(data, 'bookmarks');
+            ? all
+            : all.filter(
+                (bookmark) =>
+                  (bookmark as { libraryItemId?: unknown }).libraryItemId ===
+                  library_item_id
+              );
         return untrustedJsonResult({
           numBookmarks: bookmarks.length,
           bookmarks:
