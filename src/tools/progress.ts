@@ -130,8 +130,8 @@ export function registerProgressWriteTools(
         'Deletes a progress record of the API key’s user, which removes the ' +
         'listening history for that item — position, finished state and dates. ' +
         'Takes the media progress id (field "id" of get_media_progress), not the ' +
-        'library item id. Two-step: the first call returns a confirmation token, ' +
-        'the second call with that token performs the deletion.',
+        'library item id. Asks a person first; where the client cannot show a ' +
+        'dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
         media_progress_id: z
           .string()
@@ -192,7 +192,9 @@ export function registerProgressWriteTools(
 
 export function registerBookmarkWriteTools(
   server: McpServer,
-  api: AudiobookshelfApi
+  api: AudiobookshelfApi,
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'create_bookmark',
@@ -270,14 +272,16 @@ export function registerBookmarkWriteTools(
     {
       title: 'Delete bookmark',
       description:
-        'Deletes the bookmark at a given position. No confirmation token: a ' +
-        'bookmark is a position and a title, and create_bookmark restores it.',
+        'Deletes the bookmark at a given position. Asks a person first; where ' +
+        'the client cannot show a dialog, call once to receive a token and ' +
+        'again with it.',
       inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
+        confirm_token: confirmTokenParam,
       }),
       annotations: {
         // Idempotent by the specification's wording.
@@ -287,7 +291,7 @@ export function registerBookmarkWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ library_item_id, time }) =>
+    async ({ library_item_id, time, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(library_item_id, 'library_item_id');
         // The position goes into the path, so it must be a finite number and
@@ -295,6 +299,36 @@ export function registerBookmarkWriteTools(
         if (!Number.isFinite(time)) {
           throw new Error('invalid time: must be a finite number of seconds');
         }
+        // The description used to say this needed no confirmation because
+        // "create_bookmark restores it". It restores a bookmark at that
+        // position; the title somebody typed is gone, and the position is the
+        // only thing the delete call knows — a wrong `time` takes out a
+        // different bookmark than the one that was meant.
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete the bookmark at ${time} seconds of item ${safeId}`,
+            consequence:
+              'The title that was typed for it is not recoverable. ' +
+              'create_bookmark makes a new one at that position, with a new ' +
+              'title.',
+            resourceKey: setResourceKey('delete_bookmark', [
+              safeId,
+              String(time),
+            ]),
+            token: confirm_token,
+            toolName: 'delete_bookmark',
+            hint: 'Tick to go ahead, leave it to cancel.',
+          }
+        );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult('The user declined. delete_bookmark did nothing.');
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
         await api.delete(`/api/me/item/${safeId}/bookmark/${time}`);
         return textResult(
           `Bookmark at ${time} seconds of item ${safeId} deleted.`

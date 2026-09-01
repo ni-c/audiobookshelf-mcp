@@ -101,10 +101,22 @@ left out and why.
 
 ## Which tools change something?
 
-15 of the 44. In a client that shows MCP annotations, the read tools carry
-`readOnlyHint` and the six that remove something carry `destructiveHint`. The
-[tools reference](/reference/tools) labels every one, and
-`AUDIOBOOKSHELF_READ_ONLY=true` removes all writes.
+15 of the 44. Every tool declares all four MCP annotations — `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, `openWorldHint` — so a client that shows
+them can tell before it calls. The [tools reference](/reference/tools) labels
+every one, and `AUDIOBOOKSHELF_READ_ONLY=true` removes all writes.
+
+Annotations are advice a client may ignore; the six marked 👤 also **ask a
+person**, which is enforced here and cannot be. See
+[Asking a person](/guide/approval).
+
+## A tool answered with a `confirm_token` instead of asking
+
+That is the fallback for a client that cannot show a dialog. Call the tool again
+with the same arguments plus the token; it is single-use and lasts five minutes.
+If your client *can* show dialogs, check whether `ELICITATION` is set to `false`
+somewhere in the environment — it carries no prefix, so it may have been meant
+for a different server.
 
 ## Where do I report a problem?
 

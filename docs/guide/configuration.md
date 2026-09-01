@@ -9,11 +9,20 @@ and no command-line flag.
 | `AUDIOBOOKSHELF_API_KEY`      | yes      | —       | API key, sent as `Authorization: Bearer …`                    |
 | `AUDIOBOOKSHELF_READ_ONLY`    | no       | `false` | `true` registers only the 29 read tools                       |
 | `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates for this connection   |
+| `ELICITATION`                 | no       | `true`  | `false` replaces the approval dialog with the two-call token   |
 
-Only the exact string `true` enables the two booleans. `1`, `yes` and `TRUE` do
-not — which is worth knowing, because a typo in `AUDIOBOOKSHELF_READ_ONLY` fails
-*open*, with the write tools registered. The server logs which switches are active
-at startup; check that line rather than trusting the spelling.
+Only the exact string `true` enables the two `AUDIOBOOKSHELF_*` booleans. `1`,
+`yes` and `TRUE` do not — which is worth knowing, because a typo in
+`AUDIOBOOKSHELF_READ_ONLY` fails *open*, with the write tools registered. The
+server logs which switches are active at startup; check that line rather than
+trusting the spelling.
+
+`ELICITATION` is the exception in both directions: it is case-insensitive, and a
+value that is neither `true` nor `false` **stops the server** instead of falling
+back. It is the only one here that defaults to *on*, so failing open on a typo
+would leave the dialog running while you believed it was off. It also carries no
+prefix, which means it reaches every MCP server in the same environment — see
+[Asking a person](/guide/approval).
 
 See the [environment reference](/reference/environment) for the same table with
 the validation rules.

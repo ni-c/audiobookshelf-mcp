@@ -23,6 +23,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing that works today stops working — but where a person can be asked, one
   is, instead of a token that only proves the same call was made twice.
 
+- **Three more tools ask before they act**, all of which carried
+  `destructiveHint: true` and went through unannounced: `delete_bookmark`,
+  `remove_books_from_collection` and `remove_items_from_playlist`.
+
+  They were exempt because they could be undone, and that turned out to be only
+  half true. `add_books_to_collection` appends at the end rather than restoring
+  an order. `create_bookmark` makes a new bookmark at a position, with a new
+  title — the one somebody typed is gone, and the position is the only thing
+  `delete_bookmark` is given, so a wrong `time` takes out a different bookmark
+  than the one that was meant. And Audiobookshelf deletes a playlist outright
+  once its last entry is removed, which `remove_items_from_playlist` already
+  warned about _after_ the fact.
+
+  `delete_bookmark`'s description said in so many words "No confirmation token:
+  a bookmark is a position and a title, and create_bookmark restores it." It
+  does not restore the title.
+
+- `ELICITATION` switches the dialog off — `false` sends a client that could have
+  been asked down the two-call-token path instead. For a scheduled job or a test
+  harness, where a dialog is the wrong shape rather than an unwanted one.
+
+  It does **not** remove the guard: there is no setting in which a guarded call
+  goes unannounced. Two deliberate rough edges come with it. The variable is
+  **not prefixed**, so one `export ELICITATION=false` reaches every MCP server in
+  the environment — which is why a server started with it off prints a line
+  saying so, and why the fallback text names the server instead of blaming a
+  client that was working fine. And a value that is neither `true` nor `false`
+  **stops the server**: it is the only variable here that defaults to _on_, so
+  failing open on a typo would leave the dialog running while the operator
+  believed it was off. It is read after the API key is wiped from the
+  environment, so that exit cannot leave the key behind.
+
+- A `docs/guide/approval.md` page, and a 👤 marker in the generated tool
+  reference that is read off the registered schema rather than from a list kept
+  beside it.
+
 ### Changed
 
 - Runs on **MCP SDK 2.0**. Existing clients see the same protocol revision they

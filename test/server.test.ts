@@ -11,11 +11,27 @@ const config: Config = {
   readOnly: false,
 };
 
-async function connect(overrides: Partial<Config> = {}): Promise<Client> {
+async function connect(
+  overrides: Partial<Config> = {},
+  // Omitted means the client declares no elicitation capability. Passing
+  // 'accept' answers every dialog with a yes, which is how a test about
+  // something *after* the guard gets past it.
+  elicit?: 'accept' | 'decline'
+): Promise<Client> {
   const server = createServer({ ...config, ...overrides });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test', version: '0.0.0' });
+  const client = new Client(
+    { name: 'test', version: '0.0.0' },
+    elicit === undefined ? {} : { capabilities: { elicitation: {} } }
+  );
+  if (elicit !== undefined) {
+    client.setRequestHandler('elicitation/create', () =>
+      elicit === 'decline'
+        ? { action: 'decline' }
+        : { action: 'accept', content: { confirm: true } }
+    );
+  }
   await Promise.all([
     client.connect(clientTransport),
     server.connect(serverTransport),
@@ -376,7 +392,7 @@ describe('server', () => {
   it('warns that an emptied playlist was deleted by the server', async () => {
     mockJson({ id: 'pl_1', name: 'Roadtrip', items: [] });
     const result = await (
-      await connect()
+      await connect({}, 'accept')
     ).callTool({
       name: 'remove_items_from_playlist',
       arguments: {

@@ -21,8 +21,8 @@ features:
     details: An expanded library item carries every audio file, track and chapter with full ffprobe metadata. Every media response is a compact projection instead, with detail="full" when you really want the raw object.
   - title: Register only the tools you need
     details: 'AUDIOBOOKSHELF_READ_ONLY=true registers the read tools and nothing else. AUDIOBOOKSHELF_ALLOW_TOOLS cuts finer — essential for a curated eight, your own comma-separated list, or a whole family with list_* — and AUDIOBOOKSHELF_DENY_TOOLS subtracts. Whatever is filtered out does not exist on the protocol rather than failing when called, and a name that matches no tool stops the server at startup instead of quietly going missing.'
-  - title: Safe by default
-    details: Destructive tools need a server-issued confirmation token, upstream content is marked untrusted, and read-only mode simply does not register the write tools.
+  - title: A person is asked, not just told
+    details: 'The six tools that take something out ask a person first, through MCP elicitation — a dialog the model cannot answer on its behalf. Where the client cannot show one they fall back to a single-use token bound to the exact targets, and say which of the two it was rather than implying somebody approved. Upstream content is marked untrusted, and read-only mode simply does not register the write tools.'
 ---
 
 <figure class="diagram">
@@ -61,7 +61,7 @@ features:
   <text class="label-muted" x="380" y="173" text-anchor="middle">progress · bookmarks · collections</text>
 
   <rect class="node" x="272" y="198" width="216" height="34" rx="7" />
-  <text class="label-muted" x="380" y="219" text-anchor="middle">deletes need a confirmation token</text>
+  <text class="label-muted" x="380" y="219" text-anchor="middle">deletes ask a person first</text>
 
   <text class="label-mono" x="380" y="256" text-anchor="middle">READ_ONLY=true</text>
   <text class="label-muted" x="380" y="275" text-anchor="middle">write tools are never registered</text>

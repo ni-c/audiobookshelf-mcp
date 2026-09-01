@@ -243,10 +243,12 @@ export function registerCollectionWriteTools(
       description:
         'Removes books from a collection. The books themselves are untouched — ' +
         'only their membership in the collection ends, and it can be restored ' +
-        'with add_books_to_collection.',
+        'with add_books_to_collection. Asks a person first; where the client ' +
+        'cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
         collection_id: collectionIdParam,
         library_item_ids: libraryItemIdsParam,
+        confirm_token: confirmTokenParam,
       }),
       annotations: {
         // Idempotent: removing a book that is already out leaves the same
@@ -257,15 +259,47 @@ export function registerCollectionWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ collection_id, library_item_ids }) =>
+    async ({ collection_id, library_item_ids, confirm_token }, mcp) =>
       run(async () => {
-        const updated = await api.post(
-          `/api/collections/${assertPathSegment(collection_id, 'collection_id')}/batch/remove`,
+        const safeCollection = assertPathSegment(
+          collection_id,
+          'collection_id'
+        );
+        const books = library_item_ids.map((id) =>
+          assertPathSegment(id, 'library_item_id')
+        );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
           {
-            books: library_item_ids.map((id) =>
-              assertPathSegment(id, 'library_item_id')
-            ),
+            // Ids only: a collection name is user-controlled content and this
+            // string is read by a model as well as by a person.
+            what: `remove ${books.length} book(s) from collection ${safeCollection}`,
+            consequence:
+              'The curated order of the collection cannot be reconstructed ' +
+              'from here — putting the books back with add_books_to_collection ' +
+              'appends them at the end. The items themselves are not deleted.',
+            resourceKey: setResourceKey('remove_books_from_collection', [
+              safeCollection,
+              ...books,
+            ]),
+            token: confirm_token,
+            toolName: 'remove_books_from_collection',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
+        );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            'The user declined. remove_books_from_collection did nothing.'
+          );
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
+        const updated = await api.post(
+          `/api/collections/${safeCollection}/batch/remove`,
+          { books }
         );
         return untrustedJsonResult(compactCollection(updated));
       })
@@ -277,9 +311,9 @@ export function registerCollectionWriteTools(
       title: 'Delete collection',
       description:
         'Deletes a collection. The books stay in the library, but the curated ' +
-        'list and its order are gone. Two-step: the first call returns a ' +
-        'confirmation token, the second call with that token performs the ' +
-        'deletion. Requires an Audiobookshelf account with delete permission.',
+        'list and its order are gone. Asks a person first; where the client ' +
+        'cannot show a dialog, call once to receive a token and again with it. ' +
+        'Requires an Audiobookshelf account with delete permission.',
       inputSchema: z.object({
         collection_id: collectionIdParam,
         confirm_token: confirmTokenParam,

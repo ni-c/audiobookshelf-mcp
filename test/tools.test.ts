@@ -327,12 +327,6 @@ describe('write tools', () => {
       { books: ['li_1'] },
     ],
     [
-      'remove_books_from_collection',
-      { collection_id: 'col_1', library_item_ids: ['li_1'] },
-      '/api/collections/col_1/batch/remove',
-      { books: ['li_1'] },
-    ],
-    [
       'add_items_to_playlist',
       { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
       '/api/playlists/pl_1/batch/add',
@@ -394,9 +388,128 @@ describe('write tools', () => {
     });
   });
 
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+      '/api/collections/col_1/batch/remove',
+      { books: ['li_1'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+      '/api/playlists/pl_1/batch/remove',
+      { items: [{ libraryItemId: 'li_1' }] },
+    ],
+  ] as [string, Record<string, unknown>, string, unknown][])(
+    '%s posts to %s, but only once a person has agreed',
+    async (name, args, path, body) => {
+      // Both take something out of a list somebody curated, and both used to
+      // go through unannounced while carrying destructiveHint: true.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+      const result = await client.callTool({ name, arguments: args });
+
+      expect(client.prompts).toHaveLength(1);
+      expect(result.isError).toBeFalsy();
+      const call = callsOf(spy)[0]!;
+      expect(new URL(call.url).pathname).toBe(path);
+      expect(call.method).toBe('POST');
+      expect(call.body).toEqual(body);
+    }
+  );
+
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
+    ['delete_bookmark', { library_item_id: 'li_1', time: 90 }],
+    ['delete_collection', { collection_id: 'col_1' }],
+    ['delete_playlist', { playlist_id: 'pl_1' }],
+    ['delete_media_progress', { media_progress_id: 'mp_1' }],
+  ] as [string, Record<string, unknown>][])(
+    '%s removes nothing when the person declines',
+    async (name, args) => {
+      const spy = mockFetch();
+      const client = await connect({}, 'decline');
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError).toBe(true);
+      expect(spy).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+      { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_1' }, { library_item_id: 'li_2' }],
+      },
+    ],
+    [
+      'delete_bookmark',
+      { library_item_id: 'li_1', time: 90 },
+      { library_item_id: 'li_1', time: 120 },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s falls back to a token, bound to the exact targets',
+    async (name, args, widened) => {
+      // No elicitation capability: this is the path a stateless gateway takes.
+      const spy = mockFetch();
+      const client = await connect();
+
+      const first = await client.callTool({ name, arguments: args });
+      expect(spy).not.toHaveBeenCalled();
+      const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
+      expect(token).toBeDefined();
+
+      // The same token against a wider set is refused with the reason, not
+      // answered with a fresh prompt: the key names the exact targets.
+      const wrong = await client.callTool({
+        name,
+        arguments: { ...widened, confirm_token: token },
+      });
+      expect(wrong.isError).toBe(true);
+      expect(firstText(wrong)).toContain('issued for different arguments');
+      expect(spy).not.toHaveBeenCalled();
+
+      const second = await client.callTool({
+        name,
+        arguments: { ...args, confirm_token: token },
+      });
+      expect(second.isError).toBeFalsy();
+      expect(spy).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('keeps a user-chosen name out of the sentence it asks with', async () => {
+    // Collection and playlist names are content somebody typed, and the prompt
+    // is read by a model as well as by a person — so the prompts name ids and
+    // counts only.
+    const client = await connect({}, 'decline');
+    await client.callTool({
+      name: 'remove_books_from_collection',
+      arguments: { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+    });
+    expect(client.prompts[0]).toContain(
+      'remove 2 book(s) from collection col_1'
+    );
+  });
+
   it('manages bookmarks', async () => {
     const spy = mockFetch();
-    const client = await connect();
+    const client = await connect({}, 'accept');
 
     await client.callTool({
       name: 'create_bookmark',
@@ -770,7 +883,7 @@ describe('write tool edge cases', () => {
   it('says so when removing the last entry deleted the playlist', async () => {
     mockFetch({ id: 'pl_1', name: 'Roadtrip', items: [] });
     const result = await (
-      await connect()
+      await connect({}, 'accept')
     ).callTool({
       name: 'remove_items_from_playlist',
       arguments: { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },

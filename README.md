@@ -59,6 +59,7 @@ once, at creation.
 | `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `true` accepts self-signed certificates — scoped to this connection, not process-wide   |
 | `AUDIOBOOKSHELF_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset      |
 | `AUDIOBOOKSHELF_DENY_TOOLS`   | no       | Same syntax; removed from whatever `AUDIOBOOKSHELF_ALLOW_TOOLS` left                    |
+| `ELICITATION`                 | no       | `false` replaces the approval dialog with the two-call token. **Not prefixed**          |
 
 The server starts without configuration: it completes the MCP handshake and lists
 its tools, and every call then fails with the setup instructions. That is
@@ -168,15 +169,18 @@ command line, are in the
 
 ### Writing
 
-| Tool                                                            | What it does                                                            |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `set_media_progress`                                            | Set position, mark finished or unfinished, hide from Continue Listening |
-| `delete_media_progress`                                         | Delete a progress record — needs a confirmation token                   |
-| `create_bookmark` / `update_bookmark` / `delete_bookmark`       | Named positions in a book                                               |
-| `create_collection` / `update_collection` / `delete_collection` | Collections; delete needs a confirmation token                          |
-| `add_books_to_collection` / `remove_books_from_collection`      | Collection membership                                                   |
-| `create_playlist` / `update_playlist` / `delete_playlist`       | Playlists; delete needs a confirmation token                            |
-| `add_items_to_playlist` / `remove_items_from_playlist`          | Playlist membership                                                     |
+| Tool                                                               | What it does                                                            |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `set_media_progress`                                               | Set position, mark finished or unfinished, hide from Continue Listening |
+| `delete_media_progress` 👤                                         | Delete a progress record — the listening history of that item           |
+| `create_bookmark` / `update_bookmark` / `delete_bookmark` 👤       | Named positions in a book                                               |
+| `create_collection` / `update_collection` / `delete_collection` 👤 | Collections                                                             |
+| `add_books_to_collection` / `remove_books_from_collection` 👤      | Collection membership                                                   |
+| `create_playlist` / `update_playlist` / `delete_playlist` 👤       | Playlists                                                               |
+| `add_items_to_playlist` / `remove_items_from_playlist` 👤          | Playlist membership                                                     |
+
+👤 asks a person through MCP elicitation · falls back to a two-call
+`confirm_token` where the client cannot show a dialog.
 
 ### Response size
 
@@ -203,16 +207,23 @@ filter_group="issues"    (standalone, no value)
 
 - **Read-only mode.** `AUDIOBOOKSHELF_READ_ONLY=true` does not register the write
   tools at all, rather than refusing them at call time.
-- **Confirmation tokens.** `delete_collection`, `delete_playlist` and
-  `delete_media_progress` answer the first call with a single-use token that is
-  bound to the target id and expires after five minutes; only a second call
-  carrying that token performs the deletion. A plain `confirm: true` flag could be
-  set by the model on the first try, or be talked into it by text coming out of
-  the library. Operations that are cheap to undo — removing an item from a
-  collection, deleting a bookmark — are marked destructive but do not require a
-  token.
+- **A person is asked, not just told.** The six tools that take something out —
+  the three deletes, `delete_bookmark`, `remove_books_from_collection` and
+  `remove_items_from_playlist` — raise a real dialog through MCP elicitation,
+  which the model cannot answer on its behalf. A plain `confirm: true` flag could
+  be set by the model on the first try, or be talked into it by text coming out
+  of the library.
+
+  Where the client cannot show a dialog they fall back to a single-use token
+  bound to the exact targets and expiring after five minutes. That fallback
+  proves the call was made twice with the same arguments and nothing more, and
+  the text says so rather than implying somebody approved. `ELICITATION=false`
+  takes it deliberately; it never removes the guard. See
+  [Asking a person](https://audiobookshelf-mcp.ni-c.de/guide/approval).
+
 - **Confirmation prompts never quote API content.** Collection and playlist names
-  are user-supplied text and are read by a model, so the prompts name only ids.
+  are user-supplied text and are read by a model, so the prompts name ids and
+  counts only.
 - **Untrusted content is marked.** Book descriptions come from metadata providers
   and podcast summaries come from RSS feeds — third parties write them. Every
   result carrying such content is labelled as data, not instructions.

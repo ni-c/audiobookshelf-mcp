@@ -6,6 +6,65 @@ function env(values: Record<string, string>): NodeJS.ProcessEnv {
   return { ...values } as NodeJS.ProcessEnv;
 }
 
+describe('ELICITATION', () => {
+  const base = {
+    AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+    AUDIOBOOKSHELF_API_KEY: 'secret',
+  };
+
+  it('defaults to on, and to on for an empty value', () => {
+    // The only variable of this family that defaults to *on*. An unset switch
+    // has to mean "ask", or a deployment that never heard of it would quietly
+    // stop asking.
+    expect(loadConfig(env(base)).elicitation).toBe(true);
+    expect(loadConfig(env({ ...base, ELICITATION: '' })).elicitation).toBe(
+      true
+    );
+  });
+
+  it('is switched off by "false", in any casing or padding', () => {
+    for (const raw of ['false', 'FALSE', ' False ']) {
+      expect(
+        loadConfig(env({ ...base, ELICITATION: raw })).elicitation,
+        raw
+      ).toBe(false);
+    }
+  });
+
+  it('refuses to start on anything else, naming both valid values', () => {
+    for (const raw of ['1', 'off', 'no']) {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('exit');
+      }) as never);
+      expect(() => loadConfig(env({ ...base, ELICITATION: raw }))).toThrow(
+        'exit'
+      );
+      expect(exit).toHaveBeenCalledWith(1);
+      const message = String(error.mock.calls[0]?.[0] ?? '');
+      expect(message, raw).toContain('ELICITATION');
+      expect(message, raw).toContain('"true"');
+      expect(message, raw).toContain('"false"');
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('has already wiped the API key by the time it can exit', () => {
+    // parseElicitation sits *after* the delete on purpose. An exit above it
+    // would leave the key in the environment for whatever a crash reporter or
+    // an inspector does next — which is exactly what that delete exists to
+    // prevent, and its comment says so.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    const e = env({ ...base, ELICITATION: 'nonsense' });
+    expect(() => loadConfig(e)).toThrow('exit');
+    expect(e.AUDIOBOOKSHELF_API_KEY).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+});
+
 describe('loadConfig', () => {
   it('starts without credentials so tools stay listable', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

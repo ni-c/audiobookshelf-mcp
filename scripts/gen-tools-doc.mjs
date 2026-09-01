@@ -30,6 +30,7 @@ async function listTools() {
     apiKey: 'placeholder',
     insecureTls: false,
     readOnly: false,
+    elicitation: true,
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -91,11 +92,20 @@ function renderTool(tool) {
     : (tool.annotations?.destructiveHint ?? true)
       ? 'write, destructive'
       : 'write';
+  // Read off the schema rather than from a list kept next to it: a tool is
+  // guarded exactly when it accepts the fallback token, and that is a fact
+  // about this server's own registration, not a guess about someone else's.
+  const asks = Object.hasOwn(
+    tool.inputSchema?.properties ?? {},
+    'confirm_token'
+  )
+    ? ' 👤'
+    : '';
   // Generated from the same constant the filter reads, so "which tools does
   // `essential` select" cannot be written down twice and drift.
   const preset = ESSENTIAL_TOOLS.includes(tool.name) ? ', **essential**' : '';
 
-  const lines = [`### \`${tool.name}\``, ''];
+  const lines = [`### \`${tool.name}\`${asks}`, ''];
   if (tool.title) lines.push(`**${tool.title}** — ${kind}${preset}`, '');
   lines.push(escapeCell(tool.description), '');
 
@@ -146,6 +156,17 @@ function render(tools) {
     'Every tool that returns media accepts `detail` — `"compact"` (the default)',
     'returns a projection with the fields that matter for browsing, `"full"`',
     'returns the raw Audiobookshelf object, which is very large.',
+    '',
+    '👤 marks a tool that **asks a person** before it acts, through MCP',
+    'elicitation — a dialog the model cannot answer on its behalf. Where the',
+    'client cannot show one, it falls back to a two-call `confirm_token`, and',
+    'says which of the two it was. `ELICITATION=false` takes that fallback',
+    'deliberately; it never removes the guard. See',
+    '[Asking a person](/guide/approval).',
+    '',
+    'Every tool declares all four MCP annotations — `readOnlyHint`,',
+    '`destructiveHint`, `idempotentHint`, `openWorldHint`. They are a hint a',
+    'client may ignore; the dialog is enforced here and cannot be.',
     '',
     '## Read tools',
     '',

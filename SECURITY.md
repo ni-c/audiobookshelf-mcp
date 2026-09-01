@@ -32,11 +32,23 @@ Treat every environment variable this server reads as a secret. The MCP client
 process, and therefore the model driving it, sees every tool result — do not point
 this server at a system whose data you would not put in a model's context.
 
-Destructive operations require a server-generated confirmation token that is bound to
-the specific target; a model cannot satisfy that gate on its own. Data returned from
-the upstream API is untrusted input — book descriptions come from metadata providers
-and podcast summaries from RSS feeds, both written by third parties. It is marked as
-such in every result, and confirmation prompts never quote it.
+Six operations that take something out — the three deletes, `delete_bookmark`,
+`remove_books_from_collection` and `remove_items_from_playlist` — **ask a person**
+through MCP elicitation. That is a dialog raised by the server and shown by the
+client, which the model cannot answer on its behalf; nothing happens until an
+answer comes back, and the approval is bound to the exact targets.
+
+Where the client cannot show a dialog, they fall back to a server-generated token
+bound the same way. That fallback is weaker and this server says so rather than
+implying somebody approved: it proves the call was made twice with the same
+arguments, and nothing more. `ELICITATION=false` moves a capable client onto it
+deliberately, for deployments where a dialog is the wrong shape — it does not remove
+the guard, and the server prints one line at startup saying it is off.
+
+Data returned from the upstream API is untrusted input — book descriptions come from
+metadata providers and podcast summaries from RSS feeds, both written by third
+parties. It is marked as such in every result, and confirmation prompts never quote
+it.
 
 ## What this server deliberately cannot do
 

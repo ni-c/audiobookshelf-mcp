@@ -60,7 +60,10 @@ export function createServer(config: Config): McpServer {
   const confirmations = new ConfirmationStore();
   // One approver per server: it holds the key that seals the request state
   // carried out through the client and back.
-  const approval = createApproval({ server: 'audiobookshelf-mcp' });
+  const approval = createApproval({
+    server: 'audiobookshelf-mcp',
+    elicitation: config.elicitation,
+  });
 
   const server = new McpServer({
     name: 'audiobookshelf-mcp',
@@ -81,7 +84,7 @@ export function createServer(config: Config): McpServer {
   // call time would still advertise capabilities the server refuses to provide.
   if (!config.readOnly) {
     registerProgressWriteTools(server, api, confirmations, approval);
-    registerBookmarkWriteTools(server, api);
+    registerBookmarkWriteTools(server, api, confirmations, approval);
     registerCollectionWriteTools(server, api, confirmations, approval);
     registerPlaylistWriteTools(server, api, confirmations, approval);
   }

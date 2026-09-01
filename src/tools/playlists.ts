@@ -255,10 +255,12 @@ export function registerPlaylistWriteTools(
         'Removes entries from a playlist. The media itself is untouched and the ' +
         'entries can be added back with add_items_to_playlist. Note that ' +
         'Audiobookshelf deletes a playlist automatically once its last entry is ' +
-        'removed.',
+        'removed. Asks a person first; where the client cannot show a dialog, ' +
+        'call once to receive a token and again with it.',
       inputSchema: z.object({
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
+        confirm_token: confirmTokenParam,
       }),
       annotations: {
         // Idempotent: removing an item that is already out leaves the same
@@ -269,10 +271,41 @@ export function registerPlaylistWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ playlist_id, items }) =>
+    async ({ playlist_id, items, confirm_token }, mcp) =>
       run(async () => {
+        const safeId = assertPathSegment(playlist_id, 'playlist_id');
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            // Ids only: a playlist name is user-controlled content and this
+            // string is read by a model as well as by a person.
+            what: `remove ${items.length} entr${items.length === 1 ? 'y' : 'ies'} from playlist ${safeId}`,
+            consequence:
+              'Audiobookshelf deletes a playlist outright once its last entry ' +
+              'is removed, and a deleted playlist cannot be restored. Where ' +
+              'entries remain, adding them back appends them at the end — the ' +
+              'order is not recoverable from here.',
+            resourceKey: setResourceKey('remove_items_from_playlist', [
+              safeId,
+              ...items.map((item) => JSON.stringify(item)),
+            ]),
+            token: confirm_token,
+            toolName: 'remove_items_from_playlist',
+            hint: 'Tick to go ahead, leave it to cancel.',
+          }
+        );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            'The user declined. remove_items_from_playlist did nothing.'
+          );
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
         const updated = await api.post(
-          `/api/playlists/${assertPathSegment(playlist_id, 'playlist_id')}/batch/remove`,
+          `/api/playlists/${safeId}/batch/remove`,
           { items: toApiItems(items) }
         );
         const shaped = compactPlaylist(updated);
@@ -298,9 +331,9 @@ export function registerPlaylistWriteTools(
     {
       title: 'Delete playlist',
       description:
-        'Deletes a playlist. The media stays in the library. Two-step: the first ' +
-        'call returns a confirmation token, the second call with that token ' +
-        'performs the deletion.',
+        'Deletes a playlist. The media stays in the library. ' +
+        'Asks a person first; where the client cannot show a dialog, call once ' +
+        'to receive a token and again with it.',
       inputSchema: z.object({
         playlist_id: playlistIdParam,
         confirm_token: confirmTokenParam,
