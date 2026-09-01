@@ -386,7 +386,7 @@ Creates a bookmark at a position of a book for the API key’s user. The positio
 
 ### `update_bookmark`
 
-**Update bookmark** — write
+**Update bookmark** — write, destructive
 
 Renames the bookmark at a given position. The position itself cannot be changed — delete the bookmark and create a new one for that.
 
@@ -422,7 +422,7 @@ Creates a collection of books. Audiobookshelf rejects empty collections, so at l
 
 ### `update_collection`
 
-**Update collection** — write
+**Update collection** — write, destructive
 
 Renames a collection, changes its description or reorders its books. library_item_ids replaces the order completely, so it has to contain every item that should stay in the collection — use add_books_to_collection and remove_books_from_collection to change membership.
 
@@ -481,7 +481,7 @@ Creates a playlist for the API key’s user. Unlike a collection it may start ou
 
 ### `update_playlist`
 
-**Update playlist** — write
+**Update playlist** — write, destructive
 
 Renames a playlist, changes its description or reorders its entries. items replaces the order completely, so it has to contain every entry that should stay — use add_items_to_playlist and remove_items_from_playlist to change membership. The library of a playlist cannot be changed.
 

@@ -10,6 +10,7 @@ import {
 } from '../result.js';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { confirmTokenParam, detailParam } from '../schema.js';
 import { compactPlaylist, listFrom } from '../shape.js';
 
@@ -74,7 +75,7 @@ export function registerPlaylistReadTools(
           .describe('Restrict the result to this library'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -100,7 +101,7 @@ export function registerPlaylistReadTools(
         playlist_id: playlistIdParam,
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ playlist_id, detail }) =>
       run(async () => {
@@ -142,6 +143,13 @@ export function registerPlaylistWriteTools(
           .optional()
           .describe('Initial entries, optional'),
       }),
+      annotations: {
+        // Additive. Not idempotent: a second call makes a second playlist.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ library_id, name, description, items }) =>
       run(async () => {
@@ -177,6 +185,13 @@ export function registerPlaylistWriteTools(
           .optional()
           .describe('Complete, newly ordered list of entries'),
       }),
+      annotations: {
+        // Replaces a name and description somebody typed, with no history.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ playlist_id, name, description, items }) =>
       run(async () => {
@@ -213,6 +228,14 @@ export function registerPlaylistWriteTools(
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
       }),
+      annotations: {
+        // Additive, and unlike a collection a playlist is an ordered list:
+        // adding the same item twice leaves it in twice.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ playlist_id, items }) =>
       run(async () => {
@@ -237,7 +260,14 @@ export function registerPlaylistWriteTools(
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent: removing an item that is already out leaves the same
+        // playlist.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ playlist_id, items }) =>
       run(async () => {
@@ -275,7 +305,13 @@ export function registerPlaylistWriteTools(
         playlist_id: playlistIdParam,
         confirm_token: confirmTokenParam,
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent by the specification's wording.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ playlist_id, confirm_token }, mcp) =>
       run(async () => {

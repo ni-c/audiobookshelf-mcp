@@ -7,6 +7,7 @@ import {
 } from '../shape.js';
 
 import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { errorResult, run, untrustedJsonResult } from '../result.js';
 import { detailParam, libraryItemIdParam } from '../schema.js';
 
@@ -27,7 +28,7 @@ export function registerItemReadTools(
         library_item_id: libraryItemIdParam,
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
@@ -55,7 +56,7 @@ export function registerItemReadTools(
       inputSchema: z.object({
         library_item_id: libraryItemIdParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_item_id }) =>
       run(async () => {
@@ -94,7 +95,7 @@ export function registerItemReadTools(
         episode_id: z.string().min(1).describe('Podcast episode id'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -135,7 +136,7 @@ export function registerItemReadTools(
           .describe('Episodes per page, default 25, max 100'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, page, limit, detail }) =>
       run(async () => {

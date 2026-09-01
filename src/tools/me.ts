@@ -17,6 +17,7 @@ import {
 } from '../shape.js';
 
 import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { jsonResult, run, untrustedJsonResult } from '../result.js';
 
 const EPISODE_ID_DESCRIPTION =
@@ -38,7 +39,7 @@ export function registerMeReadTools(
       inputSchema: z.object({
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ detail }) =>
       run(async () => {
@@ -60,7 +61,7 @@ export function registerMeReadTools(
         limit: limitParam(25),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ limit, detail }) =>
       run(async () => {
@@ -93,7 +94,7 @@ export function registerMeReadTools(
           .describe(EPISODE_ID_DESCRIPTION),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -122,7 +123,7 @@ export function registerMeReadTools(
       inputSchema: z.object({
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ detail }) =>
       run(async () => {
@@ -148,7 +149,7 @@ export function registerMeReadTools(
           .max(2100)
           .describe('Calendar year, e.g. 2026'),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ year }) =>
       run(async () =>
@@ -168,7 +169,7 @@ export function registerMeReadTools(
         limit: limitParam(10),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ page, limit, detail }) =>
       run(async () => {
@@ -206,7 +207,7 @@ export function registerMeReadTools(
           ),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_item_id, detail }) =>
       run(async () => {

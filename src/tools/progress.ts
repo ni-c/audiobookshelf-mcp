@@ -60,6 +60,15 @@ export function registerProgressWriteTools(
               'its position'
           ),
       }),
+      annotations: {
+        // A listening position is a marker, not authored content, and moving
+        // it is what this tool is for. delete_media_progress is the one that
+        // loses the history.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({
       library_item_id,
@@ -132,7 +141,13 @@ export function registerProgressWriteTools(
           ),
         confirm_token: confirmTokenParam,
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent: the listening history is gone either way.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ media_progress_id, confirm_token }, mcp) =>
       run(async () => {
@@ -195,6 +210,13 @@ export function registerBookmarkWriteTools(
           .describe('Position in seconds where the bookmark is placed'),
         title: z.string().min(1).max(255).describe('Bookmark title'),
       }),
+      annotations: {
+        // Additive. Two calls leave two bookmarks.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -223,6 +245,13 @@ export function registerBookmarkWriteTools(
           .describe('Position in seconds identifying the bookmark'),
         title: z.string().min(1).max(255).describe('New bookmark title'),
       }),
+      annotations: {
+        // Replaces a title somebody typed, with no history.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -250,7 +279,13 @@ export function registerBookmarkWriteTools(
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent by the specification's wording.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ library_item_id, time }) =>
       run(async () => {

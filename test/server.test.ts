@@ -119,6 +119,69 @@ describe('server', () => {
     expect(writeTool?.annotations?.destructiveHint).toBe(true);
   });
 
+  it('declares all four annotation hints on every tool', async () => {
+    // Not a style rule. Two of the four default to a *stronger* claim than
+    // silence suggests: the specification gives destructiveHint and
+    // openWorldHint a default of true, so a tool that omits them announces
+    // itself as destructive and open-world. Nine tools here had no
+    // annotations block at all, which is that claim in its loudest form.
+    const tools = (await (await connect()).listTools()).tools;
+    const hints = [
+      'readOnlyHint',
+      'destructiveHint',
+      'idempotentHint',
+      'openWorldHint',
+    ] as const;
+    for (const tool of tools) {
+      for (const hint of hints) {
+        expect(typeof tool.annotations?.[hint], `${tool.name}.${hint}`).toBe(
+          'boolean'
+        );
+      }
+    }
+  });
+
+  it('warns only where something written is lost', async () => {
+    // The line: content a person typed, replaced with no way back, is
+    // destructive; a marker or a membership is not. Six of the fifteen write
+    // tools used to inherit destructiveHint: true from the default, including
+    // three called create_*.
+    const tools = (await (await connect()).listTools()).tools;
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    for (const additive of [
+      'create_collection',
+      'create_playlist',
+      'create_bookmark',
+      'add_books_to_collection',
+      'add_items_to_playlist',
+      'set_media_progress',
+    ]) {
+      expect(byName.get(additive)?.destructiveHint, additive).toBe(false);
+    }
+    for (const destructive of [
+      'update_collection',
+      'update_playlist',
+      'update_bookmark',
+      'remove_books_from_collection',
+      'remove_items_from_playlist',
+      'delete_collection',
+      'delete_playlist',
+      'delete_bookmark',
+      'delete_media_progress',
+    ]) {
+      expect(byName.get(destructive)?.destructiveHint, destructive).toBe(true);
+    }
+  });
+
+  it('tells a set apart from an ordered list', async () => {
+    // A collection holds each book once, so adding one it already has changes
+    // nothing. A playlist is ordered and takes the same item twice.
+    const tools = (await (await connect()).listTools()).tools;
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    expect(byName.get('add_books_to_collection')?.idempotentHint).toBe(true);
+    expect(byName.get('add_items_to_playlist')?.idempotentHint).toBe(false);
+  });
+
   it('rejects a path-traversal id before calling the API', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const result = await (

@@ -22,6 +22,7 @@ import {
 } from '../shape.js';
 
 import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { jsonResult, run, untrustedJsonResult } from '../result.js';
 
 const DEFAULT_ITEM_LIMIT = 25;
@@ -52,7 +53,7 @@ export function registerLibraryReadTools(
       inputSchema: z.object({
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ detail }) =>
       run(async () => {
@@ -77,7 +78,7 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -101,7 +102,7 @@ export function registerLibraryReadTools(
       inputSchema: z.object({
         library_id: libraryIdParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id }) =>
       run(async () => {
@@ -123,7 +124,7 @@ export function registerLibraryReadTools(
       inputSchema: z.object({
         library_id: libraryIdParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id }) =>
       run(async () => {
@@ -174,7 +175,7 @@ export function registerLibraryReadTools(
           .describe('Collapse books of the same series into one entry'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({
       library_id,
@@ -239,7 +240,7 @@ export function registerLibraryReadTools(
         limit: limitParam(DEFAULT_SEARCH_LIMIT),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, q, limit, detail }) =>
       run(async () => {
@@ -295,7 +296,7 @@ export function registerLibraryReadTools(
         limit: limitParam(10),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, limit, detail }) =>
       run(async () => {
@@ -350,7 +351,7 @@ export function registerLibraryReadTools(
         descending: z.boolean().optional().describe('Reverse the sort order'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, page, limit, sort, descending, detail }) =>
       run(async () => {
@@ -389,7 +390,7 @@ export function registerLibraryReadTools(
         series_id: z.string().min(1).describe('Series id'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ series_id, detail }) =>
       run(async () => {
@@ -414,7 +415,7 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -452,7 +453,7 @@ export function registerLibraryReadTools(
           .describe('Restrict the returned items to this library'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ author_id, include_items, library_id, detail }) =>
       run(async () => {
@@ -482,7 +483,7 @@ export function registerLibraryReadTools(
         'Lists all tags used on the server, across libraries. Tags are the ' +
         'user-defined labels on library items.',
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async () => run(async () => untrustedJsonResult(await api.get('/api/tags')))
   );
@@ -495,7 +496,7 @@ export function registerLibraryReadTools(
         'Lists all genres used on the server, across libraries. Genres come from ' +
         'the media metadata, not from the user.',
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async () =>
       run(async () => untrustedJsonResult(await api.get('/api/genres')))
@@ -510,7 +511,7 @@ export function registerLibraryReadTools(
         'to check connectivity and whether the server is new enough for API keys ' +
         '(2.26.0 or later).',
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async () => run(async () => jsonResult(await api.get('/status')))
   );

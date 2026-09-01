@@ -10,6 +10,7 @@ import {
 } from '../result.js';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { confirmTokenParam, detailParam } from '../schema.js';
 import { compactCollection, listFrom } from '../shape.js';
 
@@ -44,7 +45,7 @@ export function registerCollectionReadTools(
           .describe('Restrict the result to this library'),
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -73,7 +74,7 @@ export function registerCollectionReadTools(
         collection_id: collectionIdParam,
         detail: detailParam,
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     async ({ collection_id, detail }) =>
       run(async () => {
@@ -114,6 +115,13 @@ export function registerCollectionWriteTools(
           .describe('Optional description'),
         library_item_ids: libraryItemIdsParam,
       }),
+      annotations: {
+        // Additive. Not idempotent: a second call makes a second collection.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ library_id, name, description, library_item_ids }) =>
       run(async () => {
@@ -157,6 +165,13 @@ export function registerCollectionWriteTools(
             'Complete, newly ordered list of the books in the collection'
           ),
       }),
+      annotations: {
+        // Replaces a name and description somebody typed, with no history.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ collection_id, name, description, library_item_ids }) =>
       run(async () => {
@@ -198,6 +213,14 @@ export function registerCollectionWriteTools(
         collection_id: collectionIdParam,
         library_item_ids: libraryItemIdsParam,
       }),
+      annotations: {
+        // Additive, and a collection is a set — adding a book it already
+        // holds changes nothing.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ collection_id, library_item_ids }) =>
       run(async () => {
@@ -225,7 +248,14 @@ export function registerCollectionWriteTools(
         collection_id: collectionIdParam,
         library_item_ids: libraryItemIdsParam,
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent: removing a book that is already out leaves the same
+        // collection.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ collection_id, library_item_ids }) =>
       run(async () => {
@@ -254,7 +284,14 @@ export function registerCollectionWriteTools(
         collection_id: collectionIdParam,
         confirm_token: confirmTokenParam,
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent by the specification's wording — the second call fails,
+        // but the world is the same either way.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ collection_id, confirm_token }, mcp) =>
       run(async () => {
