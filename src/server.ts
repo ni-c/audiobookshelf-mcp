@@ -1,5 +1,8 @@
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/server';
+import { buildToolFilter, installToolFilter } from 'mcp-tool-allowlist';
+
+import { ALL_TOOLS, ESSENTIAL_TOOLS, READ_TOOLS } from './tools/catalogue.js';
 import {
   registerCollectionReadTools,
   registerCollectionWriteTools,
@@ -14,7 +17,6 @@ import {
 } from './tools/progress.js';
 
 import { AudiobookshelfApi } from './api.js';
-import { buildToolFilter, installToolFilter } from './tool-filter.js';
 import type { Config } from './config.js';
 import { ConfirmationStore } from './confirm.js';
 import { registerItemReadTools } from './tools/items.js';
@@ -34,7 +36,25 @@ function packageVersion(): string {
 export function createServer(config: Config): McpServer {
   // Before anything is built: an unusable tool list should fail on the
   // way in, not leave a server running with tools quietly missing.
-  const filter = buildToolFilter(config);
+  const filter = buildToolFilter({
+    allowTools: config.allowTools,
+    denyTools: config.denyTools,
+    catalogue: {
+      all: ALL_TOOLS,
+      essential: ESSENTIAL_TOOLS,
+      ungated: READ_TOOLS,
+    },
+    names: {
+      allow: 'AUDIOBOOKSHELF_ALLOW_TOOLS',
+      deny: 'AUDIOBOOKSHELF_DENY_TOOLS',
+      server: 'audiobookshelf-mcp',
+    },
+    gate: {
+      closed: config.readOnly,
+      variable: 'AUDIOBOOKSHELF_READ_ONLY',
+      noun: 'read-only mode',
+    },
+  });
 
   const api = new AudiobookshelfApi(config);
   const confirmations = new ConfirmationStore();
