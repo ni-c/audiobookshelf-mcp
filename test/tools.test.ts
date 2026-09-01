@@ -33,16 +33,43 @@ const GENERIC_BODY = {
   total: 0,
 };
 
-async function connect(overrides: Partial<Config> = {}): Promise<Client> {
+/** How a client that can show a dialog answers it. */
+type ElicitBehaviour = 'accept' | 'decline' | 'cancel';
+
+/**
+ * Connects a client to the real server.
+ *
+ * Without `elicit` the client declares no elicitation capability, which is the
+ * case the two-call token exists for and what every other test here drives.
+ * With it, the client answers the dialog and `prompts` records what the server
+ * put in front of the user.
+ */
+async function connect(
+  overrides: Partial<Config> = {},
+  elicit?: ElicitBehaviour
+): Promise<Client & { prompts: string[] }> {
   const server = createServer({ ...config, ...overrides });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test', version: '0.0.0' });
+  const prompts: string[] = [];
+  const client = new Client(
+    { name: 'test', version: '0.0.0' },
+    elicit === undefined ? {} : { capabilities: { elicitation: {} } }
+  );
+  if (elicit !== undefined) {
+    client.setRequestHandler('elicitation/create', (request) => {
+      const params = request.params as { message?: string };
+      prompts.push(params.message ?? '');
+      if (elicit === 'cancel') return { action: 'cancel' };
+      if (elicit === 'decline') return { action: 'decline' };
+      return { action: 'accept', content: { confirm: true } };
+    });
+  }
   await Promise.all([
     client.connect(clientTransport),
     server.connect(serverTransport),
   ]);
-  return client;
+  return Object.assign(client, { prompts });
 }
 
 function mockFetch(body: unknown = GENERIC_BODY) {
@@ -434,15 +461,81 @@ describe('write tools', () => {
       expect(call.method).toBe('DELETE');
       expect(new URL(call.url).pathname).toBe(path);
 
-      // The token is single-use: replaying it must not delete again.
+      // The token is single-use: replaying it must not delete again, and the
+      // refusal now says why rather than handing out a fresh prompt.
       const replay = await client.callTool({
         name,
         arguments: { [idParam]: id, confirm_token: token },
       });
       expect(replay.isError).toBe(true);
+      expect(firstText(replay)).toContain('invalid, expired');
       expect(spy).toHaveBeenCalledTimes(1);
     }
   );
+
+  it.each([
+    ['delete_collection', 'collection_id', 'col_1', '/api/collections/col_1'],
+    ['delete_playlist', 'playlist_id', 'pl_1', '/api/playlists/pl_1'],
+    [
+      'delete_media_progress',
+      'media_progress_id',
+      'mp_1',
+      '/api/me/progress/mp_1',
+    ],
+  ])(
+    '%s asks the user, and deletes once they accept',
+    async (name, idParam, id, path) => {
+      // The point of the approval path: a client that can put a question in front
+      // of a person gets asked, instead of a token that only proves the same call
+      // was made twice.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+      const result = await client.callTool({
+        name,
+        arguments: { [idParam]: id },
+      });
+      expect(client.prompts).toHaveLength(1);
+      expect(result.isError).toBeFalsy();
+      expect(new URL(callsOf(spy)[0]!.url).pathname).toBe(path);
+    }
+  );
+
+  it('deletes nothing when the user declines', async () => {
+    const spy = mockFetch();
+    const client = await connect({}, 'decline');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(result.isError).toBe(true);
+    expect(firstText(result)).toContain('declined');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('deletes nothing when the user closes the dialog', async () => {
+    // Cancel is not a yes: for an irreversible delete the only safe reading of
+    // "no answer" is no.
+    const spy = mockFetch();
+    const client = await connect({}, 'cancel');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(result.isError).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('offers no token to a client it can ask properly', async () => {
+    // The control that makes the cases above mean something: the token path is
+    // unchanged, so a server that silently never asked would pass all of them.
+    mockFetch();
+    const client = await connect({}, 'decline');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(firstText(result)).not.toContain('confirm_token');
+  });
 });
 
 /** Text of the first content block of a tool result. */

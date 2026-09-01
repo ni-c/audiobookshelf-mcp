@@ -1,10 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  confirmationPrompt,
-  setResourceKey,
-  type ConfirmationStore,
-} from '../confirm.js';
+import { setResourceKey } from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
   run,
@@ -93,7 +90,8 @@ export function registerCollectionReadTools(
 export function registerCollectionWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
-  confirmations: ConfirmationStore
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'create_collection',
@@ -258,30 +256,40 @@ export function registerCollectionWriteTools(
       }),
       annotations: { destructiveHint: true },
     },
-    async ({ collection_id, confirm_token }) =>
+    async ({ collection_id, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(collection_id, 'collection_id');
         const resource = setResourceKey('delete_collection', [safeId]);
 
-        if (!confirmations.consume(resource, confirm_token)) {
-          if (confirm_token !== undefined) {
-            return errorResult(
-              'The confirmation token is invalid, expired or was issued for a ' +
-                'different collection. Call delete_collection without a token to ' +
-                'get a new one.'
-            );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            // Deliberately only the id in this text — a collection name is
+            // user-controlled content and this string is read by a model.
+            what: `delete collection ${safeId}`,
+            consequence:
+              'The collection cannot be restored from here. The items it held are ' +
+              'not deleted.',
+            resourceKey: resource,
+            token: confirm_token,
+            toolName: 'delete_collection',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
-          const token = confirmations.issue(resource);
-          // Deliberately only the id in this text — a collection name is
-          // user-controlled content and this string is read by a model.
-          return textResult(
-            confirmationPrompt(
-              `delete collection ${safeId}`,
-              token,
-              confirmations.ttlMinutes
-            )
+        );
+        // A token that was sent and did not match is refused with the reason
+        // rather than answered with a fresh prompt; the sentence is the
+        // library's, so every server refuses in the same words.
+        if (outcome.decision === 'rejected') {
+          return errorResult(outcome.reason);
+        }
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            `The user declined. delete_collection did nothing.`
           );
         }
+        if (outcome.decision === 'pending') return outcome.result;
 
         await api.delete(`/api/collections/${safeId}`);
         return textResult(`Collection ${safeId} deleted.`);

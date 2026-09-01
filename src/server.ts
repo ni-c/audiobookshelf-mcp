@@ -18,7 +18,7 @@ import {
 
 import { AudiobookshelfApi } from './api.js';
 import type { Config } from './config.js';
-import { ConfirmationStore } from './confirm.js';
+import { ConfirmationStore, createApproval } from 'mcp-approval';
 import { registerItemReadTools } from './tools/items.js';
 import { registerLibraryReadTools } from './tools/libraries.js';
 import { registerMeReadTools } from './tools/me.js';
@@ -58,6 +58,9 @@ export function createServer(config: Config): McpServer {
 
   const api = new AudiobookshelfApi(config);
   const confirmations = new ConfirmationStore();
+  // One approver per server: it holds the key that seals the request state
+  // carried out through the client and back.
+  const approval = createApproval({ server: 'audiobookshelf-mcp' });
 
   const server = new McpServer({
     name: 'audiobookshelf-mcp',
@@ -77,10 +80,10 @@ export function createServer(config: Config): McpServer {
   // Read-only mode does not register the write tools at all. Rejecting them at
   // call time would still advertise capabilities the server refuses to provide.
   if (!config.readOnly) {
-    registerProgressWriteTools(server, api, confirmations);
+    registerProgressWriteTools(server, api, confirmations, approval);
     registerBookmarkWriteTools(server, api);
-    registerCollectionWriteTools(server, api, confirmations);
-    registerPlaylistWriteTools(server, api, confirmations);
+    registerCollectionWriteTools(server, api, confirmations, approval);
+    registerPlaylistWriteTools(server, api, confirmations, approval);
   }
 
   return server;

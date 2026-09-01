@@ -1,10 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  confirmationPrompt,
-  setResourceKey,
-  type ConfirmationStore,
-} from '../confirm.js';
+import { setResourceKey } from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
   run,
@@ -120,7 +117,8 @@ export function registerPlaylistReadTools(
 export function registerPlaylistWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
-  confirmations: ConfirmationStore
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'create_playlist',
@@ -279,28 +277,36 @@ export function registerPlaylistWriteTools(
       }),
       annotations: { destructiveHint: true },
     },
-    async ({ playlist_id, confirm_token }) =>
+    async ({ playlist_id, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(playlist_id, 'playlist_id');
         const resource = setResourceKey('delete_playlist', [safeId]);
 
-        if (!confirmations.consume(resource, confirm_token)) {
-          if (confirm_token !== undefined) {
-            return errorResult(
-              'The confirmation token is invalid, expired or was issued for a ' +
-                'different playlist. Call delete_playlist without a token to get ' +
-                'a new one.'
-            );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete playlist ${safeId}`,
+            consequence:
+              'The playlist cannot be restored from here. The items it held are ' +
+              'not deleted.',
+            resourceKey: resource,
+            token: confirm_token,
+            toolName: 'delete_playlist',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
-          const token = confirmations.issue(resource);
-          return textResult(
-            confirmationPrompt(
-              `delete playlist ${safeId}`,
-              token,
-              confirmations.ttlMinutes
-            )
-          );
+        );
+        // A token that was sent and did not match is refused with the reason
+        // rather than answered with a fresh prompt; the sentence is the
+        // library's, so every server refuses in the same words.
+        if (outcome.decision === 'rejected') {
+          return errorResult(outcome.reason);
         }
+        if (outcome.decision === 'declined') {
+          return errorResult(`The user declined. delete_playlist did nothing.`);
+        }
+        if (outcome.decision === 'pending') return outcome.result;
 
         await api.delete(`/api/playlists/${safeId}`);
         return textResult(`Playlist ${safeId} deleted.`);

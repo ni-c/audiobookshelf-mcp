@@ -1,10 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  confirmationPrompt,
-  setResourceKey,
-  type ConfirmationStore,
-} from '../confirm.js';
+import { setResourceKey } from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { errorResult, run, textResult } from '../result.js';
@@ -21,7 +18,8 @@ const episodeIdParam = z
 export function registerProgressWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
-  confirmations: ConfirmationStore
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'set_media_progress',
@@ -136,7 +134,7 @@ export function registerProgressWriteTools(
       }),
       annotations: { destructiveHint: true },
     },
-    async ({ media_progress_id, confirm_token }) =>
+    async ({ media_progress_id, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(
           media_progress_id,
@@ -144,23 +142,32 @@ export function registerProgressWriteTools(
         );
         const resource = setResourceKey('delete_media_progress', [safeId]);
 
-        if (!confirmations.consume(resource, confirm_token)) {
-          if (confirm_token !== undefined) {
-            return errorResult(
-              'The confirmation token is invalid, expired or was issued for a ' +
-                'different progress record. Call delete_media_progress without a ' +
-                'token to get a new one.'
-            );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete the listening history of media progress ${safeId}`,
+            consequence:
+              'The saved position and listening history for that item are lost.',
+            resourceKey: resource,
+            token: confirm_token,
+            toolName: 'delete_media_progress',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
-          const token = confirmations.issue(resource);
-          return textResult(
-            confirmationPrompt(
-              `delete the listening history of media progress ${safeId}`,
-              token,
-              confirmations.ttlMinutes
-            )
+        );
+        // A token that was sent and did not match is refused with the reason
+        // rather than answered with a fresh prompt; the sentence is the
+        // library's, so every server refuses in the same words.
+        if (outcome.decision === 'rejected') {
+          return errorResult(outcome.reason);
+        }
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            `The user declined. delete_media_progress did nothing.`
           );
         }
+        if (outcome.decision === 'pending') return outcome.result;
 
         await api.delete(`/api/me/progress/${safeId}`);
         return textResult(`Media progress ${safeId} deleted.`);
