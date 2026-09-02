@@ -5,16 +5,142 @@ import type {
 
 import { AudiobookshelfApiError } from './api.js';
 
+/**
+ * Ceiling on one tool result.
+ *
+ * Seven of the fourteen listing tools have no `limit` at all — Audiobookshelf
+ * does not paginate `/api/collections`, `/api/playlists` or the library
+ * metadata routes — and `detail: "full"` switches off the compact projections
+ * on every tool that has them. So "how big is the answer" was a property of the
+ * user's instance rather than of the request: forty collections of three
+ * hundred books is roughly 7 MB of JSON out of a read tool that asks nobody
+ * anything.
+ */
+export const MAX_RESULT_BYTES = 100_000;
+
+/**
+ * Bytes, not characters.
+ *
+ * `String.prototype.length` counts UTF-16 code units, and titles, authors and
+ * descriptions are free text — a library of CJK-titled books is roughly three
+ * bytes per counted unit, so a character budget lets through three times what
+ * it promises.
+ */
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
+}
+
 export function textResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-export function jsonResult(data: unknown): CallToolResult {
-  return textResult(JSON.stringify(data, null, 2));
-}
-
 export function errorResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }], isError: true };
+}
+
+/** The longest array field of a record, or none. */
+function longestArrayKey(record: Record<string, unknown>): string | undefined {
+  return Object.entries(record)
+    .filter(
+      (entry): entry is [string, unknown[]] =>
+        Array.isArray(entry[1]) && entry[1].length > 1
+    )
+    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+}
+
+/** The longest string field of a record beyond `floor` characters, or none. */
+function longestStringKey(
+  record: Record<string, unknown>,
+  floor: number
+): string | undefined {
+  return Object.entries(record)
+    .filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === 'string' && entry[1].length > floor
+    )
+    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+}
+
+/**
+ * Serializes a result inside {@link MAX_RESULT_BYTES}, dropping whole entries
+ * rather than characters.
+ *
+ * Whole entries, never a slice of the serialized JSON: a truncated document is
+ * not a smaller answer, it is an unparseable one. The `truncated` block comes
+ * first so it is read before the data it describes, and it names what to do —
+ * a truncation nobody can act on is a quieter way of losing the data.
+ *
+ * It sits in `jsonResult` and `untrustedJsonResult` rather than in each tool,
+ * so `detail: "full"` — which switches the compact projections off — is covered
+ * by the same ceiling.
+ */
+export function budgetedJson(data: unknown): string {
+  let rendered = JSON.stringify(data, null, 2);
+  if (byteLength(rendered) <= MAX_RESULT_BYTES) return rendered;
+  if (data === null || typeof data !== 'object') return rendered;
+
+  if (Array.isArray(data)) {
+    return budgetedJson({ truncatedArray: data });
+  }
+
+  const copy = structuredClone(data) as Record<string, unknown>;
+  const dropped: Record<string, number> = {};
+  const withNote = (): string =>
+    JSON.stringify(
+      {
+        truncated: {
+          reason: `the full result exceeded ${MAX_RESULT_BYTES} bytes`,
+          dropped_entries: dropped,
+          follow_up:
+            'Ask for fewer entries — most listing tools take limit and page, ' +
+            'library_id restricts a server-wide listing to one library, and ' +
+            'detail:"compact" is much smaller than detail:"full".',
+        },
+        ...copy,
+      },
+      null,
+      2
+    );
+
+  // Halve the longest array until it fits. Halving rather than measuring: one
+  // entry can be arbitrarily large — a library item carries every audio file,
+  // track and chapter — so this has to be able to reach a single entry instead
+  // of assuming an average size.
+  for (;;) {
+    const key = longestArrayKey(copy);
+    if (key === undefined) break;
+    const items = copy[key] as unknown[];
+    const keep = Math.floor(items.length / 2);
+    dropped[key] = (dropped[key] ?? 0) + (items.length - keep);
+    copy[key] = items.slice(0, keep);
+    rendered = withNote();
+    if (byteLength(rendered) <= MAX_RESULT_BYTES) return rendered;
+  }
+
+  // No array left to shorten: the oversize is in the text fields of a single
+  // object. Shorten them longest-first, each one marked, so the structure
+  // survives and the reader can see what was cut.
+  for (;;) {
+    const key = longestStringKey(copy, 200);
+    if (key === undefined) break;
+    const value = copy[key] as string;
+    copy[key] =
+      `${value.slice(0, 200)}… (${value.length - 200} more characters omitted)`;
+    rendered = withNote();
+    if (byteLength(rendered) <= MAX_RESULT_BYTES) return rendered;
+  }
+
+  return JSON.stringify({
+    error:
+      'The response exceeds the result size budget even after dropping entries ' +
+      'and shortening text fields. This is not a normal Audiobookshelf object — ' +
+      'check what the instance returned.',
+    bytes: byteLength(rendered),
+  });
+}
+
+export function jsonResult(data: unknown): CallToolResult {
+  return textResult(budgetedJson(data));
 }
 
 /**
@@ -31,9 +157,12 @@ export function untrustedResult(text: string): CallToolResult {
   );
 }
 
-/** {@link untrustedResult} for a value that still needs serializing. */
+/**
+ * {@link untrustedResult} for a value that still needs serializing, inside the
+ * same budget {@link jsonResult} respects.
+ */
 export function untrustedJsonResult(data: unknown): CallToolResult {
-  return untrustedResult(JSON.stringify(data, null, 2));
+  return untrustedResult(budgetedJson(data));
 }
 
 const MAX_ERROR_BODY_LENGTH = 2000;

@@ -405,16 +405,49 @@ export function compactAuthor(
   });
 }
 
+/**
+ * How many members of a collection or playlist a *compact* projection embeds.
+ *
+ * `numBooks` and `numItems` already say how many there are, and neither
+ * `/api/collections` nor `/api/playlists` paginates, so an unbounded embed made
+ * the size of a listing a property of the instance: forty collections of three
+ * hundred books is twelve thousand embedded items. Whoever wants the whole
+ * membership asks for the one collection with `get_collection`, where it is a
+ * single object rather than a multiplier.
+ */
+const COMPACT_MEMBERS = 25;
+
+/** `[shown, note]` — the entries to embed and, if any were left out, why. */
+function boundedMembers<T>(
+  items: T[],
+  what: string,
+  followUp: string
+): { shown: T[]; note?: string } {
+  if (items.length <= COMPACT_MEMBERS) return { shown: items };
+  return {
+    shown: items.slice(0, COMPACT_MEMBERS),
+    note:
+      `Showing the first ${COMPACT_MEMBERS} of ${items.length} ${what}. ` +
+      followUp,
+  };
+}
+
 export function compactCollection(value: unknown): Record<string, unknown> {
   const collection = rec(value);
   const books = arr(collection.books);
+  const { shown, note } = boundedMembers(
+    books,
+    'books',
+    'Call get_collection with this id for the whole collection.'
+  );
   return defined({
     id: str(collection.id),
     libraryId: str(collection.libraryId),
     name: str(collection.name),
     description: truncateText(collection.description),
     numBooks: books.length,
-    books: books.map((b) => compactLibraryItem(b)),
+    books: shown.map((b) => compactLibraryItem(b)),
+    booksTruncated: note,
     createdAt: num(collection.createdAt),
     lastUpdate: num(collection.lastUpdate),
   });
@@ -423,13 +456,18 @@ export function compactCollection(value: unknown): Record<string, unknown> {
 export function compactPlaylist(value: unknown): Record<string, unknown> {
   const playlist = rec(value);
   const items = arr(playlist.items);
+  const { shown, note } = boundedMembers(
+    items,
+    'items',
+    'Call get_playlist with this id for the whole playlist.'
+  );
   return defined({
     id: str(playlist.id),
     libraryId: str(playlist.libraryId),
     name: str(playlist.name),
     description: truncateText(playlist.description),
     numItems: items.length,
-    items: items.map((entry) => {
+    items: shown.map((entry) => {
       const item = rec(entry);
       return defined({
         libraryItemId: str(item.libraryItemId),
@@ -444,6 +482,7 @@ export function compactPlaylist(value: unknown): Record<string, unknown> {
             : compactPodcastEpisode(item.episode),
       });
     }),
+    itemsTruncated: note,
     createdAt: num(playlist.createdAt),
     lastUpdate: num(playlist.lastUpdate),
   });
