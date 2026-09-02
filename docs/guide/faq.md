@@ -106,9 +106,16 @@ left out and why.
 them can tell before it calls. The [tools reference](/reference/tools) labels
 every one, and `AUDIOBOOKSHELF_READ_ONLY=true` removes all writes.
 
-Annotations are advice a client may ignore; the six marked 👤 also **ask a
+Annotations are advice a client may ignore; the eight marked 👤 also **ask a
 person**, which is enforced here and cannot be. See
 [Asking a person](/guide/approval).
+
+`update_collection` and `update_playlist` ask only for the half that replaces a
+curated order. `library_item_ids` / `items` reorders the entries that are
+already there — it adds nothing and removes nothing — but the order somebody
+arranged is gone afterwards, which is the same reason
+`remove_books_from_collection` asks. Renaming and re-describing stay free: those
+are recoverable by typing the old text back.
 
 ## A tool answered with a `confirm_token` instead of asking
 

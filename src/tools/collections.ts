@@ -143,11 +143,18 @@ export function registerCollectionWriteTools(
     {
       title: 'Update collection',
       description:
-        'Renames a collection, changes its description or reorders its books. ' +
-        'library_item_ids replaces the order completely, so it has to contain ' +
-        'every item that should stay in the collection — use ' +
-        'add_books_to_collection and remove_books_from_collection to change ' +
-        'membership.',
+        'Renames a collection, changes its description or reorders its books.\n\n' +
+        'library_item_ids ONLY REORDERS. It cannot add or remove anything: ' +
+        'Audiobookshelf sorts the books the collection already has by their ' +
+        'position in this list, so an id that is not currently in the ' +
+        'collection is ignored, and a book you leave out is not removed — it ' +
+        'moves to the FRONT. Pass every current book, in the order you want. ' +
+        'Use add_books_to_collection and remove_books_from_collection to ' +
+        'change membership.\n\n' +
+        'Reordering asks a person first, because the order somebody arranged ' +
+        'cannot be reconstructed afterwards; renaming and re-describing do ' +
+        'not. Where the client cannot show a dialog, call once to receive a ' +
+        'token and again with it.',
       inputSchema: z.object({
         collection_id: collectionIdParam,
         name: z.string().min(1).max(255).optional().describe('New name'),
@@ -162,8 +169,10 @@ export function registerCollectionWriteTools(
           .max(200)
           .optional()
           .describe(
-            'Complete, newly ordered list of the books in the collection'
+            'The books the collection already has, in the order you want them. ' +
+              'Reorders only — it adds nothing and removes nothing.'
           ),
+        confirm_token: confirmTokenParam,
       }),
       annotations: {
         // Replaces a name and description somebody typed, with no history.
@@ -173,7 +182,10 @@ export function registerCollectionWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ collection_id, name, description, library_item_ids }) =>
+    async (
+      { collection_id, name, description, library_item_ids, confirm_token },
+      mcp
+    ) =>
       run(async () => {
         if (
           name === undefined &&
@@ -184,20 +196,76 @@ export function registerCollectionWriteTools(
             'Nothing to update: pass name, description or library_item_ids.'
           );
         }
-        const updated = await api.patch(
-          `/api/collections/${assertPathSegment(collection_id, 'collection_id')}`,
-          {
-            ...(name !== undefined ? { name } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(library_item_ids !== undefined
-              ? {
-                  books: library_item_ids.map((id) =>
-                    assertPathSegment(id, 'library_item_id')
-                  ),
-                }
-              : {}),
-          }
+        const safeCollection = assertPathSegment(
+          collection_id,
+          'collection_id'
         );
+        const books = library_item_ids?.map((id) =>
+          assertPathSegment(id, 'library_item_id')
+        );
+
+        // The gate hangs off the *effect*, not off the verb, and the effect
+        // here is narrower than the tool's own description used to claim.
+        //
+        // Measured against 2.29.0: `PATCH /api/collections/{id}` treats `books`
+        // as a **sort key over the membership it already has**. The controller
+        // loads the existing rows and sorts them by `findIndex` in the payload,
+        // so an id that is not in the collection is ignored and a book left out
+        // of the list gets index -1 and moves to the *front*. Nothing is added
+        // and nothing is removed — a list of ids that do not exist at all
+        // answers 200 and changes nothing.
+        //
+        // What it does destroy is the order somebody arranged, and that is
+        // exactly the consequence `remove_books_from_collection` names as its
+        // reason for asking: "the curated order of the collection cannot be
+        // reconstructed from here". An operation whose *only* effect is that
+        // cannot be the cheaper call.
+        //
+        // Renaming and re-describing stay free: they are recoverable by typing
+        // the old text back, and a dialog in front of every rename is how
+        // people learn to tick without reading.
+        if (books !== undefined) {
+          const outcome = await approval.requestApproval(
+            server,
+            mcp,
+            confirmations,
+            {
+              // Ids only: a collection name is user-controlled content and this
+              // string is read by a model as well as by a person.
+              what: `reorder the books in collection ${safeCollection}`,
+              consequence:
+                'The order somebody arranged is replaced and cannot be ' +
+                'reconstructed from here. Nothing leaves the collection: this ' +
+                'sorts the books it already has, and a book left out of the ' +
+                'list moves to the front rather than being removed.',
+              // Each target carries its position. `setResourceKey` sorts its
+              // list before fingerprinting, so an unprefixed list would give
+              // [A, B] and [B, A] the same key — and the order *is* part of
+              // what this tool changes.
+              resourceKey: setResourceKey('update_collection:books', [
+                `collection:${safeCollection}`,
+                ...books.map((id, index) => `${index}:${id}`),
+              ]),
+              token: confirm_token,
+              toolName: 'update_collection',
+              hint: 'Tick to go ahead, leave it to cancel.',
+            }
+          );
+          if (outcome.decision === 'rejected')
+            return errorResult(outcome.reason);
+          if (outcome.decision === 'declined') {
+            return errorResult(
+              'The user declined. update_collection did nothing.'
+            );
+          }
+          if (outcome.decision === 'pending') return outcome.result;
+        }
+
+        const updated = await api.patch(`/api/collections/${safeCollection}`, {
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(books !== undefined ? { books } : {}),
+        });
         return untrustedJsonResult(compactCollection(updated));
       })
   );
@@ -362,7 +430,8 @@ export function registerCollectionWriteTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/collections/${safeId}`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/collections/${safeId}`, { text: true });
         return textResult(`Collection ${safeId} deleted.`);
       })
   );

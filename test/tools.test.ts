@@ -290,11 +290,10 @@ describe('write tools', () => {
     });
   });
 
-  it('updates and reorders a collection', async () => {
+  it('updates and reorders a collection, after asking', async () => {
     const spy = mockFetch();
-    await (
-      await connect()
-    ).callTool({
+    const client = await connect({}, 'accept');
+    await client.callTool({
       name: 'update_collection',
       arguments: {
         collection_id: 'col_1',
@@ -302,11 +301,98 @@ describe('write tools', () => {
         library_item_ids: ['li_2', 'li_1'],
       },
     });
+    expect(client.prompts).toHaveLength(1);
     expect(callsOf(spy)[0]).toMatchObject({
       method: 'PATCH',
       body: { name: 'Renamed', books: ['li_2', 'li_1'] },
     });
   });
+
+  it.each([
+    [
+      'update_collection',
+      { collection_id: 'col_1', name: 'Renamed' },
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'update_playlist',
+      { playlist_id: 'pl_1', description: 'New' },
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s asks only for the half that replaces a curated order',
+    async (name, rename, reorder) => {
+      // The gate tests all iterate over the tools that are *known* to ask;
+      // nobody asked it the other way round, which is how a tool named as an
+      // update stayed ungated while its `library_item_ids` / `items` argument
+      // replaced an order that cannot be reconstructed — the very consequence
+      // `remove_books_from_collection` cites for asking. Renaming stays free:
+      // it is recoverable by typing the old text back.
+      //
+      // What this does NOT claim, because it is not true of 2.29.0: that the
+      // argument changes membership. It sorts what is already there.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+
+      await client.callTool({ name, arguments: rename });
+      expect(client.prompts, 'a rename must not ask').toHaveLength(0);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      await client.callTool({ name, arguments: reorder });
+      expect(client.prompts, 'a reorder must ask').toHaveLength(1);
+      expect(client.prompts[0]).toMatch(/cannot be reconstructed from here/);
+      expect(client.prompts[0]).toMatch(/Nothing leaves the/);
+    }
+  );
+
+  it.each([
+    [
+      'update_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+      { collection_id: 'col_1', library_item_ids: ['li_2', 'li_1'] },
+    ],
+    [
+      'update_playlist',
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_1' }, { library_item_id: 'li_2' }],
+      },
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_2' }, { library_item_id: 'li_1' }],
+      },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s binds its token to the order, not just to the set',
+    async (name, args, reordered) => {
+      // `setResourceKey` sorts its target list before fingerprinting, so a
+      // bare list of ids would give [A, B] and [B, A] the same key — and the
+      // order is precisely what this half of the tool changes. Each target
+      // carries its position.
+      const spy = mockFetch();
+      const client = await connect();
+
+      const first = await client.callTool({ name, arguments: args });
+      expect(spy).not.toHaveBeenCalled();
+      const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
+      expect(token).toBeDefined();
+
+      const wrong = await client.callTool({
+        name,
+        arguments: { ...reordered, confirm_token: token },
+      });
+      expect(wrong.isError).toBe(true);
+      expect(firstText(wrong)).toContain('issued for different arguments');
+      expect(spy).not.toHaveBeenCalled();
+
+      const second = await client.callTool({
+        name,
+        arguments: { ...args, confirm_token: token },
+      });
+      expect(second.isError).toBeFalsy();
+      expect(spy).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('refuses an update without any field', async () => {
     const spy = mockFetch();
@@ -435,6 +521,14 @@ describe('write tools', () => {
     ['delete_collection', { collection_id: 'col_1' }],
     ['delete_playlist', { playlist_id: 'pl_1' }],
     ['delete_media_progress', { media_progress_id: 'mp_1' }],
+    [
+      'update_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'update_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
   ] as [string, Record<string, unknown>][])(
     '%s removes nothing when the person declines',
     async (name, args) => {

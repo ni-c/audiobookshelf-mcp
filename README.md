@@ -187,8 +187,27 @@ command line, are in the
 Audiobookshelf returns very large objects — an expanded library item carries every
 audio file, track and chapter with full ffprobe metadata. Every tool that returns
 media therefore answers with a compact projection by default and accepts
-`detail: "full"` for the raw object. List tools are capped at 100 entries per call
-and say how to page on when more match.
+`detail: "full"` for the raw object.
+
+Three bounds, because one is not enough:
+
+- **A response ceiling of 5 MB.** `content-length` is checked before a byte is
+  read and a chunked body is counted while reading, so an oversized answer is
+  refused rather than parsed.
+- **A result ceiling of 100 000 bytes**, applied in `jsonResult` — so it covers
+  `detail: "full"` too. Whole entries are dropped, never characters: a truncated
+  document is not a smaller answer, it is an unparseable one. The result then
+  carries a `truncated` block naming what to call instead.
+- **A cap on embedded members.** A compact collection or playlist embeds the
+  first 25 of its books or entries and reports the real count; `get_collection`
+  and `get_playlist` return the whole membership for one of them.
+
+`list_library_items` pages properly, with `limit` and `page`. Seven listing tools
+have neither — `list_libraries`, `list_authors`, `list_tags`, `list_genres`,
+`list_collections`, `list_playlists` and `list_bookmarks` — because the
+Audiobookshelf routes behind them return everything in one answer and take no
+paging parameters. `library_id` narrows the two collection routes; the rest are
+bounded by the ceilings above.
 
 ### Filtering
 
@@ -207,9 +226,11 @@ filter_group="issues"    (standalone, no value)
 
 - **Read-only mode.** `AUDIOBOOKSHELF_READ_ONLY=true` does not register the write
   tools at all, rather than refusing them at call time.
-- **A person is asked, not just told.** The six tools that take something out —
-  the three deletes, `delete_bookmark`, `remove_books_from_collection` and
-  `remove_items_from_playlist` — raise a real dialog through MCP elicitation,
+- **A person is asked, not just told.** The eight tools that can take something
+  out — the three deletes, `delete_bookmark`, `remove_books_from_collection`,
+  `remove_items_from_playlist`, and `update_collection` / `update_playlist` when
+  they are asked to reorder, which replaces an order nobody can reconstruct —
+  raise a real dialog through MCP elicitation,
   which the model cannot answer on its behalf. A plain `confirm: true` flag could
   be set by the model on the first try, or be talked into it by text coming out
   of the library.
@@ -224,6 +245,9 @@ filter_group="issues"    (standalone, no value)
 - **Confirmation prompts never quote API content.** Collection and playlist names
   are user-supplied text and are read by a model, so the prompts name ids and
   counts only.
+- **A 200 that is not JSON is an error.** Returning the body as a string made an
+  SSO portal or a captive proxy in front of the instance look like an empty
+  library rather than like a failure.
 - **Untrusted content is marked.** Book descriptions come from metadata providers
   and podcast summaries come from RSS feeds — third parties write them. Every
   result carrying such content is labelled as data, not instructions.

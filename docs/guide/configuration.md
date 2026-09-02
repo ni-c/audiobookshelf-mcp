@@ -91,7 +91,10 @@ Not configurable, deliberately:
 | ------------------- | -------------- | ---------------------------------------------------------------------- |
 | Request timeout     | 15 s           | A hung request would hang the tool call                                |
 | Redirects           | never followed | A redirect would replay the `Authorization` header at another host     |
-| List cap            | 100 entries    | One call must not be able to flood the context                         |
+| Response ceiling    | 5 MB           | `/api/collections` does not paginate and embeds every book             |
+| Result ceiling      | 100 000 bytes  | One call must not be able to flood the context                         |
+| Item-page cap       | 100 entries    | `list_library_items` only; the API pages that route                    |
+| Embedded members    | first 25       | A compact collection or playlist reports the count, not the whole list |
 | Description cap     | 800 characters | Metadata-provider descriptions run to many kB                          |
 | Error body cap      | 2000 chars     | HTML error pages are dropped entirely, other bodies truncated          |
 | Confirm-token TTL   | 5 minutes      | Long enough for a round trip, short enough not to linger               |

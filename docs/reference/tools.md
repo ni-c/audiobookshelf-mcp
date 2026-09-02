@@ -432,18 +432,19 @@ Creates a collection of books. Audiobookshelf rejects empty collections, so at l
 | `description` | string | no | Optional description |
 | `library_item_ids` | string[] | yes | Library item ids of books |
 
-### `update_collection`
+### `update_collection` 👤
 
 **Update collection** — write, destructive
 
-Renames a collection, changes its description or reorders its books. library_item_ids replaces the order completely, so it has to contain every item that should stay in the collection — use add_books_to_collection and remove_books_from_collection to change membership.
+Renames a collection, changes its description or reorders its books. library_item_ids ONLY REORDERS. It cannot add or remove anything: Audiobookshelf sorts the books the collection already has by their position in this list, so an id that is not currently in the collection is ignored, and a book you leave out is not removed — it moves to the FRONT. Pass every current book, in the order you want. Use add_books_to_collection and remove_books_from_collection to change membership. Reordering asks a person first, because the order somebody arranged cannot be reconstructed afterwards; renaming and re-describing do not. Where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `collection_id` | string | yes | Collection id, as returned by list_collections |
 | `name` | string | no | New name |
 | `description` | string | no | New description |
-| `library_item_ids` | string[] | no | Complete, newly ordered list of the books in the collection |
+| `library_item_ids` | string[] | no | The books the collection already has, in the order you want them. Reorders only — it adds nothing and removes nothing. |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
 ### `add_books_to_collection`
 
@@ -492,18 +493,19 @@ Creates a playlist for the API key’s user. Unlike a collection it may start ou
 | `description` | string | no | Optional description |
 | `items` | object[] | no | Initial entries, optional |
 
-### `update_playlist`
+### `update_playlist` 👤
 
 **Update playlist** — write, destructive
 
-Renames a playlist, changes its description or reorders its entries. items replaces the order completely, so it has to contain every entry that should stay — use add_items_to_playlist and remove_items_from_playlist to change membership. The library of a playlist cannot be changed.
+Renames a playlist, changes its description or reorders its entries. items ONLY REORDERS. It cannot add or remove anything, and it must contain EXACTLY the entries the playlist already has: Audiobookshelf refuses a list of a different length with HTTP 400 "Invalid playlist items. Length mismatch". Read the current entries with get_playlist first, then send them in the order you want. Use add_items_to_playlist and remove_items_from_playlist to change membership. The library of a playlist cannot be changed. Reordering asks a person first, because the order somebody arranged cannot be reconstructed afterwards; renaming and re-describing do not. Where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `playlist_id` | string | yes | Playlist id, as returned by list_playlists |
 | `name` | string | no | New name |
 | `description` | string | no | New description |
-| `items` | object[] | no | Complete, newly ordered list of entries |
+| `items` | object[] | no | Exactly the entries the playlist already has, in the order you want them. Reorders only; a list of a different length is refused with HTTP 400. |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
 ### `add_items_to_playlist`
 

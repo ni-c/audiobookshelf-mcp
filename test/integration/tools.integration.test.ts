@@ -222,10 +222,41 @@ describe('collections and playlists', () => {
       'Integration Collection'
     );
 
+    const promptsBeforeRename = asking.prompts.length;
     await asking.call('update_collection', {
       collection_id: collectionId,
       name: 'Integration Collection Renamed',
     });
+    // A rename asks nobody: it is recoverable by typing the old text back.
+    expect(asking.prompts).toHaveLength(promptsBeforeRename);
+
+    // Reordering asks, and this is where the semantics were established.
+    // `library_item_ids` **only sorts what the collection already has**: the
+    // controller loads the existing rows and orders them by `findIndex` in the
+    // payload. So a book left out of the list is not removed — it gets index
+    // -1 and moves to the *front*. Only a real instance shows that; the tool's
+    // description used to say the list "has to contain every item that should
+    // stay in the collection", which reads as "omitting removes".
+    await asking.call('update_collection', {
+      collection_id: collectionId,
+      library_item_ids: [secondItemId, itemId],
+    });
+    expect(asking.prompts.length).toBe(promptsBeforeRename + 1);
+
+    await asking.call('update_collection', {
+      collection_id: collectionId,
+      library_item_ids: [itemId],
+    });
+    const afterReorder = parse<{ books: { id: string }[] }>(
+      await asking.call('get_collection', { collection_id: collectionId })
+    );
+    // Both books are still there — nothing was removed by the short list.
+    expect(afterReorder.books.map((book) => book.id).sort()).toEqual(
+      [itemId, secondItemId].sort()
+    );
+    // And the one that was left out went to the front.
+    expect(afterReorder.books[0]!.id).toBe(secondItemId);
+
     // `asking` declares elicitation, so the dialog answers this — `confirmed`
     // is for the other harness, which is offered a token instead.
     await asking.call('remove_books_from_collection', {
@@ -258,6 +289,17 @@ describe('collections and playlists', () => {
       playlist_id: playlistId,
       name: 'Integration Playlist Renamed',
     });
+    // The same on playlists, and stricter: `items` must be exactly the entries
+    // the playlist already has. A shorter list is refused outright.
+    await asking.call('update_playlist', {
+      playlist_id: playlistId,
+      items: [{ library_item_id: secondItemId }, { library_item_id: itemId }],
+    });
+    await asking.call(
+      'update_playlist',
+      { playlist_id: playlistId, items: [{ library_item_id: itemId }] },
+      { expectError: 'Length mismatch' }
+    );
     await asking.call('remove_items_from_playlist', {
       playlist_id: playlistId,
       items: [{ library_item_id: itemId }],

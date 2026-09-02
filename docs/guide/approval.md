@@ -1,7 +1,7 @@
 # Asking a person
 
-Six of the 44 tools take something out of a list somebody curated, or out of a
-listening history nobody can reconstruct. All six **ask a person first**.
+Eight of the 44 tools can take something out of a list somebody curated, or out
+of a listening history nobody can reconstruct. All eight **ask a person first**.
 
 Not a `confirm: true` argument the model can set. Not a token the model reads out
 of its own previous result. A dialog, raised through [MCP
@@ -26,6 +26,8 @@ answer comes back, nothing happens.
 | `delete_bookmark`               | the title typed for a position                                                |
 | `remove_books_from_collection`  | membership, and the order it sat in                                           |
 | `remove_items_from_playlist`    | entries — and the whole playlist, if it was the last one                      |
+| `update_collection`             | the curated order, when `library_item_ids` is given — see below              |
+| `update_playlist`               | the curated order, when `items` is given — see below                         |
 
 The last three were added because "you can just put it back" turned out to be
 only half true:
@@ -37,9 +39,33 @@ only half true:
   the one that was meant.
 - Audiobookshelf **deletes a playlist outright** once its last entry is removed.
 
-Everything else — creating, adding, updating, setting progress — asks nothing.
-Those add or set without taking anything away, and a dialog on every one of them
-is how people learn to tick without reading.
+The last two are **conditional**, and that is the point of them: the gate hangs
+off the effect, not off the verb.
+
+`update_collection` and `update_playlist` are named as updates, and one of the
+things they do is take something out — the **order** somebody arranged. That is
+the very consequence `remove_books_from_collection` cites for asking ("the
+curated order of the collection cannot be reconstructed from here"), so an
+operation whose only effect is that cannot be the cheaper call. Since 0.3.0 they
+ask whenever `library_item_ids` / `items` is present.
+
+Be clear about what those two arguments do **not** do, because their own
+descriptions used to imply otherwise. Measured against Audiobookshelf 2.29.0:
+
+- `PATCH /api/collections/{id}` treats `books` as a **sort key over the
+  membership it already has**. An id that is not in the collection is ignored,
+  and a book left out of the list is not removed — it gets index `-1` and moves
+  to the *front*. A list of ids that do not exist at all answers 200 and changes
+  nothing.
+- `PATCH /api/playlists/{id}` refuses a list whose length differs from the
+  playlist's, with `400 Invalid playlist items. Length mismatch`. It cannot drop
+  an entry even in principle.
+
+Use `remove_books_from_collection` and `remove_items_from_playlist` to change
+membership. Renaming and re-describing stay free: they are recoverable by typing
+the old text back, and a dialog in front of every rename is how people learn to
+tick without reading. Everything else — creating, adding, setting progress —
+asks nothing: it adds or sets without taking anything away.
 
 ## What the dialog contains
 

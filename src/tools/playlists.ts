@@ -168,11 +168,18 @@ export function registerPlaylistWriteTools(
     {
       title: 'Update playlist',
       description:
-        'Renames a playlist, changes its description or reorders its entries. ' +
-        'items replaces the order completely, so it has to contain every entry ' +
-        'that should stay — use add_items_to_playlist and ' +
-        'remove_items_from_playlist to change membership. The library of a ' +
-        'playlist cannot be changed.',
+        'Renames a playlist, changes its description or reorders its entries.\n\n' +
+        'items ONLY REORDERS. It cannot add or remove anything, and it must ' +
+        'contain EXACTLY the entries the playlist already has: Audiobookshelf ' +
+        'refuses a list of a different length with HTTP 400 "Invalid playlist ' +
+        'items. Length mismatch". Read the current entries with get_playlist ' +
+        'first, then send them in the order you want. Use ' +
+        'add_items_to_playlist and remove_items_from_playlist to change ' +
+        'membership. The library of a playlist cannot be changed.\n\n' +
+        'Reordering asks a person first, because the order somebody arranged ' +
+        'cannot be reconstructed afterwards; renaming and re-describing do ' +
+        'not. Where the client cannot show a dialog, call once to receive a ' +
+        'token and again with it.',
       inputSchema: z.object({
         playlist_id: playlistIdParam,
         name: z.string().min(1).max(255).optional().describe('New name'),
@@ -183,7 +190,12 @@ export function registerPlaylistWriteTools(
           .describe('New description'),
         items: playlistItemsParam
           .optional()
-          .describe('Complete, newly ordered list of entries'),
+          .describe(
+            'Exactly the entries the playlist already has, in the order you ' +
+              'want them. Reorders only; a list of a different length is ' +
+              'refused with HTTP 400.'
+          ),
+        confirm_token: confirmTokenParam,
       }),
       annotations: {
         // Replaces a name and description somebody typed, with no history.
@@ -193,7 +205,7 @@ export function registerPlaylistWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ playlist_id, name, description, items }) =>
+    async ({ playlist_id, name, description, items, confirm_token }, mcp) =>
       run(async () => {
         if (
           name === undefined &&
@@ -204,14 +216,61 @@ export function registerPlaylistWriteTools(
             'Nothing to update: pass name, description or items.'
           );
         }
-        const updated = await api.patch(
-          `/api/playlists/${assertPathSegment(playlist_id, 'playlist_id')}`,
-          {
-            ...(name !== undefined ? { name } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(items !== undefined ? { items: toApiItems(items) } : {}),
+        const safePlaylist = assertPathSegment(playlist_id, 'playlist_id');
+        const entries = items === undefined ? undefined : toApiItems(items);
+
+        // The gate hangs off the *effect*, not off the verb — see the longer
+        // note in `update_collection`. Measured against 2.29.0, `items` is a
+        // reorder and nothing else: the controller refuses a list whose length
+        // differs from the playlist's with `400 Invalid playlist items. Length
+        // mismatch`, so this cannot drop an entry even in principle. What it
+        // does replace is the order somebody arranged, which is what
+        // `remove_items_from_playlist` names as its own reason for asking.
+        if (entries !== undefined) {
+          const outcome = await approval.requestApproval(
+            server,
+            mcp,
+            confirmations,
+            {
+              // Ids only: a playlist name is user-controlled content and this
+              // string is read by a model as well as by a person.
+              what: `reorder the ${entries.length} entries of playlist ${safePlaylist}`,
+              consequence:
+                'The order somebody arranged is replaced and cannot be ' +
+                'reconstructed from here. Nothing leaves the playlist: ' +
+                'Audiobookshelf refuses a list that is not exactly the current ' +
+                'entries.',
+              // Each target carries its position. `setResourceKey` sorts its
+              // list before fingerprinting, so an unprefixed list would give
+              // [A, B] and [B, A] the same key — and the order *is* the change
+              // this tool makes.
+              resourceKey: setResourceKey('update_playlist:items', [
+                `playlist:${safePlaylist}`,
+                ...entries.map(
+                  (entry, index) =>
+                    `${index}:${String(entry.libraryItemId)}/${String(entry.episodeId ?? '')}`
+                ),
+              ]),
+              token: confirm_token,
+              toolName: 'update_playlist',
+              hint: 'Tick to go ahead, leave it to cancel.',
+            }
+          );
+          if (outcome.decision === 'rejected')
+            return errorResult(outcome.reason);
+          if (outcome.decision === 'declined') {
+            return errorResult(
+              'The user declined. update_playlist did nothing.'
+            );
           }
-        );
+          if (outcome.decision === 'pending') return outcome.result;
+        }
+
+        const updated = await api.patch(`/api/playlists/${safePlaylist}`, {
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(entries !== undefined ? { items: entries } : {}),
+        });
         return untrustedJsonResult(compactPlaylist(updated));
       })
   );
@@ -377,7 +436,8 @@ export function registerPlaylistWriteTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/playlists/${safeId}`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/playlists/${safeId}`, { text: true });
         return textResult(`Playlist ${safeId} deleted.`);
       })
   );

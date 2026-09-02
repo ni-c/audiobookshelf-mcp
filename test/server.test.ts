@@ -189,6 +189,34 @@ describe('server', () => {
     }
   });
 
+  it('guards every tool that can drop a curated membership', async () => {
+    // Written as the whole set rather than tool by tool, because the finding
+    // was a hole *between* two tools. `remove_books_from_collection` asked and
+    // `update_collection` reached the same end state without a question — its
+    // `library_item_ids` is sent as the complete membership, so every book left
+    // out of it leaves the collection. The gate boundary ran between verbs
+    // instead of between effects, and the per-tool gate tests all iterate over
+    // the tools that are known to ask, so none of them could see it.
+    //
+    // `confirm_token` in the schema is the observable half of the guard: no
+    // tool declares it without going through `requestApproval`.
+    const tools = (await (await connect()).listTools()).tools;
+    const guarded = tools
+      .filter((tool) => 'confirm_token' in (tool.inputSchema.properties ?? {}))
+      .map((tool) => tool.name)
+      .sort();
+    expect(guarded).toEqual([
+      'delete_bookmark',
+      'delete_collection',
+      'delete_media_progress',
+      'delete_playlist',
+      'remove_books_from_collection',
+      'remove_items_from_playlist',
+      'update_collection',
+      'update_playlist',
+    ]);
+  });
+
   it('tells a set apart from an ordered list', async () => {
     // A collection holds each book once, so adding one it already has changes
     // nothing. A playlist is ordered and takes the same item twice.

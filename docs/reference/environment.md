@@ -77,7 +77,10 @@ leave the key sitting there for a crash reporter.
 | ----------------- | -------------- |
 | Request timeout   | 15 s           |
 | HTTP redirects    | never followed |
-| List cap          | 100 entries    |
+| Response ceiling  | 5 MB           |
+| Result ceiling    | 100 000 bytes  |
+| Item-page cap     | 100 entries    |
+| Embedded members  | first 25       |
 | Description cap   | 800 characters |
 | Error body cap    | 2000 chars     |
 | Fallback token TTL | 5 minutes     |

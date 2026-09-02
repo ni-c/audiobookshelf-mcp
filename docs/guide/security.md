@@ -37,10 +37,26 @@ advertises a capability the server intends to decline.
 
 ## The confirmation, honestly
 
-Six operations ask a person before they act: `delete_collection`,
+Eight operations ask a person before they act: `delete_collection`,
 `delete_playlist`, `delete_media_progress` (which erases the listening history of
 an item — position, finished state and dates), `delete_bookmark`,
-`remove_books_from_collection` and `remove_items_from_playlist`.
+`remove_books_from_collection`, `remove_items_from_playlist`, and
+`update_collection` / `update_playlist` whenever they are given a replacement
+membership.
+
+The last two are the gate drawn at the **effect** rather than at the verb. Their
+`library_item_ids` / `items` argument replaces the order somebody arranged, and
+that order cannot be reconstructed — which is exactly what
+`remove_books_from_collection` names as its own reason for asking. Renaming and
+re-describing still ask nothing: those are recoverable by typing the old text
+back.
+
+Those two arguments do **not** change membership, although the tools' own
+descriptions used to imply they did. Measured against 2.29.0, `books` on a
+collection is a sort key over the rows the collection already has — a book left
+out of the list moves to the front rather than being removed — and `items` on a
+playlist is refused with `400 … Length mismatch` unless it is exactly the
+current entries. The descriptions say so now.
 
 Where the MCP client supports elicitation, the question is a **dialog** shown to
 whoever is sitting there. The model cannot answer it on their behalf, and until
@@ -113,6 +129,19 @@ something; user-controlled strings do not belong in it.
 - **The API key is removed from the environment** after the config is read.
 - `AUDIOBOOKSHELF_INSECURE_TLS` uses a scoped dispatcher, never the process-wide
   `NODE_TLS_REJECT_UNAUTHORIZED`.
+- **Responses are read under a 5 MB ceiling.** `content-length` is checked before
+  a byte is read and a chunked body is counted while reading, so an oversized
+  answer is refused rather than parsed. `/api/collections` takes no paging
+  parameters and embeds every book of every collection, which makes the size of
+  that answer a property of the instance rather than of the request.
+- **A 200 that is not JSON is an error, not an empty list.** The body used to be
+  returned as a string, and a string finds neither an array nor an envelope — so
+  an SSO portal or a captive proxy in front of the instance made `list_libraries`
+  answer "you have no libraries". A swallowed error replaced by a plausible wrong
+  answer is worse than an error. The base URL is now also rebuilt from the parsed
+  URL, because `https://abs.example.com/#dev` passed validation, lost everything
+  after the `#` in `fetch`, and sent every request to `/` — where the web UI
+  answers 200 with HTML.
 
 ## The thing worth thinking about anyway
 
