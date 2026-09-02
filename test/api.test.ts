@@ -8,6 +8,8 @@ import {
   AudiobookshelfApi,
   AudiobookshelfApiError,
   query,
+  ResponseTooLargeError,
+  UnexpectedContentTypeError,
 } from '../src/api.js';
 import type { Config } from '../src/config.js';
 
@@ -108,12 +110,37 @@ describe('AudiobookshelfApi', () => {
     fetchSpy.mockRestore();
   });
 
-  it('returns text unchanged when the response is not JSON', async () => {
+  it('refuses a 200 that is not JSON instead of returning the body', async () => {
+    // This used to return the body as a string, and the string then went into
+    // `listFrom`, which finds neither an array nor an envelope and answers
+    // `[]`. So an SSO portal or a misconfigured reverse proxy in front of the
+    // instance made `list_libraries` say "you have no libraries" — a swallowed
+    // error replaced by a plausible wrong answer, which is worse than an error.
+    // A fresh Response per call: a body stream can only be read once.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response('<html><body>Sign in</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        })
+    );
+    const api = new AudiobookshelfApi(config);
+    await expect(api.get('/api/libraries')).rejects.toBeInstanceOf(
+      UnexpectedContentTypeError
+    );
+    await expect(api.get('/api/libraries')).rejects.toThrow(
+      /SSO portal, a captive proxy or a login page/
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it('accepts a body-less success, which has no content type to check', async () => {
+    // Several DELETE and POST routes answer 200 or 204 with nothing at all.
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('OK', { status: 200 }));
+      .mockResolvedValue(new Response(null, { status: 204 }));
     const api = new AudiobookshelfApi(config);
-    await expect(api.get('/status')).resolves.toBe('OK');
+    await expect(api.delete('/api/collections/col_a')).resolves.toBeUndefined();
     fetchSpy.mockRestore();
   });
 
@@ -133,17 +160,74 @@ describe('AudiobookshelfApi', () => {
 });
 
 describe('AudiobookshelfApi transport', () => {
-  it('returns the raw text when a JSON content type carries invalid JSON', async () => {
+  it('refuses a JSON content type carrying invalid JSON', async () => {
+    // Same reasoning as the content-type check: the raw text used to be
+    // returned and then read as an empty list.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('{ this is not json', {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })
     );
-    await expect(new AudiobookshelfApi(config).get('/api/x')).resolves.toBe(
-      '{ this is not json'
+    await expect(new AudiobookshelfApi(config).get('/api/x')).rejects.toThrow(
+      /unparseable/
     );
     vi.restoreAllMocks();
+  });
+
+  it('refuses a response larger than the ceiling, by content-length', async () => {
+    // The declared length is checked before a single byte is read, so an
+    // oversized answer costs nothing. `/api/collections` has no pagination and
+    // embeds every book of every collection, so this is not theoretical.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(6 * 1024 * 1024),
+        },
+      })
+    );
+    await expect(
+      new AudiobookshelfApi(config).get('/api/collections')
+    ).rejects.toBeInstanceOf(ResponseTooLargeError);
+    fetchSpy.mockRestore();
+  });
+
+  it('refuses an oversized chunked response, which declares no length', async () => {
+    // The other half: a streamed response has no content-length, so the only
+    // way to bound it is to count while reading and stop.
+    const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    await expect(
+      new AudiobookshelfApi(config).get('/api/collections')
+    ).rejects.toThrow(/exceeds the 5 MB ceiling/);
+    fetchSpy.mockRestore();
+  });
+
+  it('still reports the status of an oversized error body', async () => {
+    // An error body is cut to 2 000 characters before it is quoted anyway, so
+    // truncating it keeps the status code — which is the diagnostic — instead
+    // of replacing it with a size complaint.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response('e'.repeat(6 * 1024 * 1024), { status: 502 })
+      );
+    await expect(
+      new AudiobookshelfApi(config).get('/api/libraries')
+    ).rejects.toBeInstanceOf(AudiobookshelfApiError);
+    fetchSpy.mockRestore();
   });
 
   it('scopes relaxed TLS to its own dispatcher instead of the whole process', async () => {

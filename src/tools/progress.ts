@@ -104,14 +104,21 @@ export function registerProgressWriteTools(
         // Only the fields below are forwarded. The endpoint applies its payload
         // to the progress record wholesale, so passing arbitrary keys through
         // would let a caller write columns this tool never intended to touch.
-        await api.patch(path, {
-          ...(current_time !== undefined ? { currentTime: current_time } : {}),
-          ...(progress !== undefined ? { progress } : {}),
-          ...(is_finished !== undefined ? { isFinished: is_finished } : {}),
-          ...(hide_from_continue_listening !== undefined
-            ? { hideFromContinueListening: hide_from_continue_listening }
-            : {}),
-        });
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.patch(
+          path,
+          {
+            ...(current_time !== undefined
+              ? { currentTime: current_time }
+              : {}),
+            ...(progress !== undefined ? { progress } : {}),
+            ...(is_finished !== undefined ? { isFinished: is_finished } : {}),
+            ...(hide_from_continue_listening !== undefined
+              ? { hideFromContinueListening: hide_from_continue_listening }
+              : {}),
+          },
+          { text: true }
+        );
 
         // The endpoint answers with 200 and no body; read the result back so the
         // model sees the state that actually got stored.
@@ -184,7 +191,8 @@ export function registerProgressWriteTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/me/progress/${safeId}`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/me/progress/${safeId}`, { text: true });
         return textResult(`Media progress ${safeId} deleted.`);
       })
   );
@@ -329,7 +337,10 @@ export function registerBookmarkWriteTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/me/item/${safeId}/bookmark/${time}`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/me/item/${safeId}/bookmark/${time}`, {
+          text: true,
+        });
         return textResult(
           `Bookmark at ${time} seconds of item ${safeId} deleted.`
         );
