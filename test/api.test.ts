@@ -18,6 +18,9 @@ const config: Config = {
   apiKey: 'test-key',
   insecureTls: false,
   readOnly: false,
+  elicitation: true,
+  allowTools: undefined,
+  denyTools: undefined,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {

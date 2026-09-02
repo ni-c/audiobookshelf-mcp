@@ -314,7 +314,13 @@ describe('loadConfig URL validation', () => {
 
 describe('missingConfigKeys', () => {
   it('names exactly the variables that are unset', () => {
-    const base = { insecureTls: false, readOnly: false };
+    const base = {
+      insecureTls: false,
+      readOnly: false,
+      elicitation: true,
+      allowTools: undefined,
+      denyTools: undefined,
+    };
     expect(
       missingConfigKeys({ ...base, url: undefined, apiKey: undefined })
     ).toEqual(['AUDIOBOOKSHELF_URL', 'AUDIOBOOKSHELF_API_KEY']);
