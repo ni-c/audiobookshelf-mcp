@@ -25,4 +25,7 @@ services:
       - /config
       - /metadata
     ports:
-      - '127.0.0.1:13378:80'
+      # Overridable because a workstation that already runs an Audiobookshelf
+      # on 13378 should not need a patched compose file. Set
+      # AUDIOBOOKSHELF_PORT; the suite reads the same variable.
+      - '127.0.0.1:${AUDIOBOOKSHELF_PORT:-13378}:80'

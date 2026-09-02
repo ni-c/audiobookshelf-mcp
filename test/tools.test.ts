@@ -757,14 +757,32 @@ function firstText(result: unknown): string {
   return content[0]?.text ?? '';
 }
 
-/** The JSON payload of a result, with the untrusted-content preamble stripped. */
+/**
+ * The payload of a result, minus the two marker fields — and a check that the
+ * text block says the same thing.
+ *
+ * The specification's rule is that `content` and `structuredContent` are the
+ * same information in two presentations, and nothing enforces it. Every
+ * assertion in this suite goes through here, so every one of them also asserts
+ * the two agree.
+ */
 function payload(result: unknown): Record<string, unknown> {
   const text = firstText(result);
+  const structured = (result as { structuredContent?: Record<string, unknown> })
+    .structuredContent;
+  if (structured === undefined) {
+    throw new Error(
+      `no structuredContent — the tool answered: ${text.slice(0, 300)}`
+    );
+  }
   const start = text.indexOf('{');
-  return JSON.parse(text.slice(start === -1 ? 0 : start)) as Record<
+  const fromText = JSON.parse(text.slice(start === -1 ? 0 : start)) as Record<
     string,
     unknown
   >;
+  expect(structured, 'structuredContent vs. text').toEqual(fromText);
+  const { untrusted: _untrusted, source: _source, ...rest } = fromText;
+  return rest;
 }
 
 describe('projections in the read tools', () => {
@@ -803,9 +821,13 @@ describe('projections in the read tools', () => {
       arguments: { library_id: 'lib_1' },
     });
 
-    const shelves = JSON.parse(
-      firstText(result).slice(firstText(result).indexOf('['))
-    ) as { type: string; entities: Record<string, unknown>[] }[];
+    // Wrapped in `{items}`: a bare array as the root of an output schema is
+    // served to a 2025-era client rewritten as `{result: …}`.
+    const shelves = (
+      payload(result) as {
+        items: { type: string; entities: Record<string, unknown>[] }[];
+      }
+    ).items;
     expect(shelves).toHaveLength(2);
     // A book shelf is projected...
     expect(shelves[0]!.entities[0]).toEqual({
@@ -964,7 +986,7 @@ describe('write tool edge cases', () => {
 
     const calls = callsOf(spy);
     expect(calls.map((c) => c.method)).toEqual(['PATCH', 'GET']);
-    expect(firstText(result)).toMatch(/^Progress updated\./);
+    expect(payload(result)).toMatchObject({ updated: true });
     expect(firstText(result)).toContain('"currentTime": 120');
   });
 

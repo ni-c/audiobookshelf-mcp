@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
   run,
-  textResult,
+  jsonResult,
   untrustedJsonResult,
 } from '../result.js';
 
@@ -46,6 +47,7 @@ export function registerCollectionReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({ collections: z.array(record) }),
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -75,6 +77,7 @@ export function registerCollectionReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ collection_id, detail }) =>
       run(async () => {
@@ -122,6 +125,7 @@ export function registerCollectionWriteTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ library_id, name, description, library_item_ids }) =>
       run(async () => {
@@ -181,6 +185,7 @@ export function registerCollectionWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async (
       { collection_id, name, description, library_item_ids, confirm_token },
@@ -289,6 +294,7 @@ export function registerCollectionWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ collection_id, library_item_ids }) =>
       run(async () => {
@@ -326,6 +332,7 @@ export function registerCollectionWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ collection_id, library_item_ids, confirm_token }, mcp) =>
       run(async () => {
@@ -394,6 +401,7 @@ export function registerCollectionWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: plain({ deleted_collection_id: z.string() }),
     },
     async ({ collection_id, confirm_token }, mcp) =>
       run(async () => {
@@ -432,7 +440,7 @@ export function registerCollectionWriteTools(
 
         // Answers `200 text/plain "OK"`, not a document.
         await api.delete(`/api/collections/${safeId}`, { text: true });
-        return textResult(`Collection ${safeId} deleted.`);
+        return jsonResult({ deleted_collection_id: safeId });
       })
   );
 }

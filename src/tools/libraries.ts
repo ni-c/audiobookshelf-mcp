@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   describeFilterGroups,
@@ -54,6 +55,7 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: plain({ libraries: z.array(record) }),
     },
     async ({ detail }) =>
       run(async () => {
@@ -79,6 +81,7 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -103,6 +106,7 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ library_id }) =>
       run(async () => {
@@ -125,6 +129,7 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_id }) =>
       run(async () => {
@@ -176,6 +181,13 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({
+        results: z.array(record),
+        total: z.number().optional(),
+        page: z.number().optional(),
+        limit: z.number().optional(),
+        note: z.string().optional(),
+      }),
     },
     async ({
       library_id,
@@ -241,6 +253,7 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_id, q, limit, detail }) =>
       run(async () => {
@@ -297,6 +310,10 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      // A bare array from the API, wrapped: a schema whose root is an array
+      // is served to a 2025-era client rewritten as `{result: …}`, so the tool
+      // would answer in two shapes depending on who asked.
+      outputSchema: marked({ items: z.array(record) }),
     },
     async ({ library_id, limit, detail }) =>
       run(async () => {
@@ -352,6 +369,12 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({
+        results: z.array(record),
+        total: z.number().optional(),
+        page: z.number().optional(),
+        limit: z.number().optional(),
+      }),
     },
     async ({ library_id, page, limit, sort, descending, detail }) =>
       run(async () => {
@@ -391,6 +414,7 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ series_id, detail }) =>
       run(async () => {
@@ -416,6 +440,10 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({
+        numAuthors: z.number().int(),
+        authors: z.array(record),
+      }),
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -454,6 +482,7 @@ export function registerLibraryReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ author_id, include_items, library_id, detail }) =>
       run(async () => {
@@ -484,6 +513,7 @@ export function registerLibraryReadTools(
         'user-defined labels on library items.',
       inputSchema: z.object({}),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async () => run(async () => untrustedJsonResult(await api.get('/api/tags')))
   );
@@ -497,6 +527,7 @@ export function registerLibraryReadTools(
         'the media metadata, not from the user.',
       inputSchema: z.object({}),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async () =>
       run(async () => untrustedJsonResult(await api.get('/api/genres')))
@@ -512,6 +543,7 @@ export function registerLibraryReadTools(
         '(2.26.0 or later).',
       inputSchema: z.object({}),
       annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async () => run(async () => jsonResult(await api.get('/status')))
   );

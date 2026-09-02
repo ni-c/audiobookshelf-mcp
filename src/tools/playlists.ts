@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
   run,
-  textResult,
+  jsonResult,
   untrustedJsonResult,
 } from '../result.js';
 
@@ -76,6 +77,7 @@ export function registerPlaylistReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({ playlists: z.array(record) }),
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -102,6 +104,7 @@ export function registerPlaylistReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ playlist_id, detail }) =>
       run(async () => {
@@ -150,6 +153,7 @@ export function registerPlaylistWriteTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ library_id, name, description, items }) =>
       run(async () => {
@@ -204,6 +208,7 @@ export function registerPlaylistWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ playlist_id, name, description, items, confirm_token }, mcp) =>
       run(async () => {
@@ -295,6 +300,7 @@ export function registerPlaylistWriteTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ playlist_id, items }) =>
       run(async () => {
@@ -329,6 +335,7 @@ export function registerPlaylistWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ playlist_id, items, confirm_token }, mcp) =>
       run(async () => {
@@ -404,6 +411,7 @@ export function registerPlaylistWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: plain({ deleted_playlist_id: z.string() }),
     },
     async ({ playlist_id, confirm_token }, mcp) =>
       run(async () => {
@@ -438,7 +446,7 @@ export function registerPlaylistWriteTools(
 
         // Answers `200 text/plain "OK"`, not a document.
         await api.delete(`/api/playlists/${safeId}`, { text: true });
-        return textResult(`Playlist ${safeId} deleted.`);
+        return jsonResult({ deleted_playlist_id: safeId });
       })
   );
 }

@@ -138,6 +138,27 @@ command line, are in the
 
 ## Tools
 
+Every tool declares an `outputSchema` and answers with `structuredContent`
+alongside the text block, so a client can use the result without parsing prose.
+Seven tools that answered with a sentence — _"Collection col_1 deleted."_ — now
+answer with the fields as well.
+
+The tools that report library metadata carry `untrusted: true` and
+`source: "audiobookshelf"` as fields: book descriptions pulled from metadata
+providers, podcast feed summaries and episode titles are all written by someone
+else. The rest are without it — an id this server was given, the account it
+authenticates as, counters the instance keeps about itself.
+
+The documents are described as open objects with the top-level keys this server
+builds. `detail: "full"` hands the API record back whole, so the same tool
+answers with far more keys than it names — and the SDK validates each result
+against its schema before it goes out, which is exactly why a strict shape would
+be wrong here.
+
+`get_personalized_shelves` answers `{items: [...]}` rather than the bare array
+the API sends: a schema whose root is an array is served to a 2025-era client
+rewritten as `{result: …}`, so it would otherwise answer in two shapes.
+
 ### Reading
 
 | Tool                                  | What it does                                                                                        |

@@ -1,10 +1,16 @@
 import { z } from 'zod';
+import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
-import { errorResult, run, textResult } from '../result.js';
+import {
+  errorResult,
+  jsonResult,
+  run,
+  untrustedJsonResult,
+} from '../result.js';
 import { confirmTokenParam, libraryItemIdParam } from '../schema.js';
 
 const episodeIdParam = z
@@ -69,6 +75,7 @@ export function registerProgressWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked({ updated: z.literal(true), progress: record }),
     },
     async ({
       library_item_id,
@@ -123,9 +130,7 @@ export function registerProgressWriteTools(
         // The endpoint answers with 200 and no body; read the result back so the
         // model sees the state that actually got stored.
         const updated = await api.get(path);
-        return textResult(
-          `Progress updated.\n${JSON.stringify(updated, null, 2)}`
-        );
+        return untrustedJsonResult({ updated: true, progress: updated });
       })
   );
 
@@ -155,6 +160,7 @@ export function registerProgressWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: plain({ deleted_progress_id: z.string() }),
     },
     async ({ media_progress_id, confirm_token }, mcp) =>
       run(async () => {
@@ -193,7 +199,7 @@ export function registerProgressWriteTools(
 
         // Answers `200 text/plain "OK"`, not a document.
         await api.delete(`/api/me/progress/${safeId}`, { text: true });
-        return textResult(`Media progress ${safeId} deleted.`);
+        return jsonResult({ deleted_progress_id: safeId });
       })
   );
 }
@@ -227,6 +233,7 @@ export function registerBookmarkWriteTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      outputSchema: marked({ created: z.literal(true), bookmark: record }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -234,9 +241,7 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return textResult(
-          `Bookmark created.\n${JSON.stringify(created, null, 2)}`
-        );
+        return untrustedJsonResult({ created: true, bookmark: created });
       })
   );
 
@@ -262,6 +267,7 @@ export function registerBookmarkWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: marked({ updated: z.literal(true), bookmark: record }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -269,9 +275,7 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return textResult(
-          `Bookmark updated.\n${JSON.stringify(updated, null, 2)}`
-        );
+        return untrustedJsonResult({ updated: true, bookmark: updated });
       })
   );
 
@@ -298,6 +302,9 @@ export function registerBookmarkWriteTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: plain({
+        deleted_bookmark: z.object({ item_id: z.string(), time: z.number() }),
+      }),
     },
     async ({ library_item_id, time, confirm_token }, mcp) =>
       run(async () => {
@@ -341,9 +348,7 @@ export function registerBookmarkWriteTools(
         await api.delete(`/api/me/item/${safeId}/bookmark/${time}`, {
           text: true,
         });
-        return textResult(
-          `Bookmark at ${time} seconds of item ${safeId} deleted.`
-        );
+        return jsonResult({ deleted_bookmark: { item_id: safeId, time } });
       })
   );
 }

@@ -52,7 +52,7 @@ async function json<T>(
 }
 
 export async function bootstrap(
-  url = 'http://127.0.0.1:13378'
+  url = `http://127.0.0.1:${process.env.AUDIOBOOKSHELF_PORT ?? '13378'}`
 ): Promise<Sandbox> {
   assertLoopback(url);
   await waitForHttp(`${url}/status`, {

@@ -138,6 +138,56 @@ describe('server', () => {
     expect(writeTool?.annotations?.destructiveHint).toBe(true);
   });
 
+  it('declares an output schema on every tool', async () => {
+    // The same argument as the annotations below, one field along. A tool that
+    // says nothing about its result forces a client to parse prose to find out
+    // what it got, and the SDK sends no `structuredContent` at all for a tool
+    // that declared no schema — seven tools here answered with a sentence.
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.outputSchema, tool.name).toBeDefined();
+      // An object root, not merely a schema. SEP-2106 allows an array or a
+      // scalar, but a 2025-era client is served that same tool with the schema
+      // rewritten to `{result: …}` — which is why get_personalized_shelves
+      // answers `{items}` rather than the array the API sends.
+      expect(tool.outputSchema?.type, tool.name).toBe('object');
+    }
+  });
+
+  it('marks the results built from library metadata as untrusted', async () => {
+    // Book descriptions pulled from metadata providers, podcast feed summaries
+    // and episode titles are all written by someone else. A client that reads
+    // only `structuredContent` must not get them unframed.
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const plainTools = tools
+      .filter((tool) => {
+        const properties = tool.outputSchema?.properties as
+          Record<string, unknown> | undefined;
+        return properties?.untrusted === undefined;
+      })
+      .map((tool) => tool.name)
+      .sort();
+    // The ones whose answer is this server's own: an id it was given, the
+    // account it authenticates as, counters the instance keeps about itself.
+    expect(plainTools).toEqual(
+      [
+        'delete_collection',
+        'delete_media_progress',
+        'delete_playlist',
+        'delete_bookmark',
+        'get_library',
+        'get_library_stats',
+        'get_me',
+        'get_media_progress',
+        'get_server_status',
+        'list_libraries',
+      ].sort()
+    );
+  });
+
   it('declares all four annotation hints on every tool', async () => {
     // Not a style rule. Two of the four default to a *stronger* claim than
     // silence suggests: the specification gives destructiveHint and

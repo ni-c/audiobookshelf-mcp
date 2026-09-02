@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { marked, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   compactLibraryItem,
@@ -29,6 +30,7 @@ export function registerItemReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
@@ -57,6 +59,7 @@ export function registerItemReadTools(
         library_item_id: libraryItemIdParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({ chapters: z.array(record) }),
     },
     async ({ library_item_id }) =>
       run(async () => {
@@ -96,6 +99,7 @@ export function registerItemReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -137,6 +141,7 @@ export function registerItemReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_id, page, limit, detail }) =>
       run(async () => {

@@ -16,6 +16,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every tool declares an `outputSchema` and answers with `structuredContent`
+  beside the text block. A client no longer has to parse prose to use a result —
+  which seven of them made unavoidable, since they answered with a sentence.
+
+  The tools that report library metadata carry `untrusted: true` and
+  `source: "audiobookshelf"` as fields, not only as a preamble in the text.
+  Book descriptions pulled from metadata providers, podcast feed summaries and
+  episode titles are written by someone else, so a client that reads the
+  structured half must not get them unframed.
+
+  The documents are described as open objects with the top-level keys this
+  server builds. `detail: "full"` hands the API record back whole, so a strict
+  shape would turn that mode into a failed call.
+
+### Changed
+
+- `get_personalized_shelves` answers `{items: [...]}` instead of the bare array
+  the API sends. A schema whose root is an array is served to a 2025-era client
+  rewritten as `{result: …}`, so the tool would otherwise answer in two shapes
+  depending on which revision the client spoke.
+
+- A result too large to shrink is an error rather than an envelope saying so.
+  The envelope was a different shape from what the tool declares it returns,
+  which the SDK refuses.
+
+- The two-call `confirm_token` prompt is an error result. What was asked for did
+  not happen, which is what `isError` says. The text is unchanged and still
+  carries the token.
+
+- The integration compose file publishes Audiobookshelf on
+  `AUDIOBOOKSHELF_PORT` (default 13378) instead of a hardcoded 13378, so a
+  workstation that already runs one there does not need a patched compose file.
+
 ### Security
 
 - **`update_collection` and `update_playlist` ask before they reorder.**

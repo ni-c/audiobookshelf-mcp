@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   detailParam,
@@ -40,6 +41,7 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ detail }) =>
       run(async () => {
@@ -62,6 +64,10 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({
+        numReturned: z.number().int(),
+        libraryItems: z.array(record),
+      }),
     },
     async ({ limit, detail }) =>
       run(async () => {
@@ -95,6 +101,7 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -124,6 +131,7 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ detail }) =>
       run(async () => {
@@ -150,6 +158,7 @@ export function registerMeReadTools(
           .describe('Calendar year, e.g. 2026'),
       }),
       annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ year }) =>
       run(async () =>
@@ -170,6 +179,7 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({ sessions: z.array(record) }),
     },
     async ({ page, limit, detail }) =>
       run(async () => {
@@ -211,6 +221,7 @@ export function registerMeReadTools(
         detail: detailParam,
       }),
       annotations: READ_ONLY,
+      outputSchema: marked({ bookmarks: z.array(record) }),
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
