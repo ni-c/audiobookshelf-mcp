@@ -201,6 +201,27 @@ describe('the result budget', () => {
     ).toThrow(ResultTooLargeError);
   });
 
+  it('stops shortening once a cut would not be a cut', () => {
+    // The string pass takes the longest field over a floor of 200 and replaces
+    // it with 200 characters plus a note saying what was dropped. That note is
+    // about thirty characters, so a 210-character value comes back out at 230:
+    // still over the floor, still the longest, and longer than it started. The
+    // loop took the same field again every round and never returned.
+    //
+    // Two thousand fields of that length, and no array to thin, so the honest
+    // answer is the refusal rather than a hang.
+    expect(() =>
+      jsonResult(
+        Object.fromEntries(
+          Array.from({ length: 2000 }, (_, index) => [
+            `field_${index}`,
+            'z'.repeat(210),
+          ])
+        )
+      )
+    ).toThrow(ResultTooLargeError);
+  });
+
   it('leaves an ordinary result completely untouched', () => {
     const data = { collections: [item(1), item(2)] };
     expect(JSON.parse(textOf(jsonResult(data)))).toEqual(data);

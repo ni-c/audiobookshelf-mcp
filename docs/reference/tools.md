@@ -9,14 +9,6 @@
 All 44 tools: 29 read, 15 write.
 With `AUDIOBOOKSHELF_READ_ONLY=true` the write tools are not registered at all.
 
-Every tool declares an `outputSchema` and answers with `structuredContent` beside
-the text block, so a client can use a result without parsing prose. The tools
-that report library metadata carry `untrusted: true` and
-`source: "audiobookshelf"` as fields of that object. The documents are described
-as open objects with the top-level keys this server builds: `detail: "full"`
-hands the API record back whole, so a strict shape would turn that mode into a
-failed call.
-
 All 44 are registered unless you say otherwise. `AUDIOBOOKSHELF_ALLOW_TOOLS`
 and `AUDIOBOOKSHELF_DENY_TOOLS` narrow the list to the ones you want, and
 `AUDIOBOOKSHELF_ALLOW_TOOLS=essential` selects the 8 marked **essential**
@@ -36,6 +28,14 @@ deliberately; it never removes the guard. See
 Every tool declares all four MCP annotations — `readOnlyHint`,
 `destructiveHint`, `idempotentHint`, `openWorldHint`. They are a hint a
 client may ignore; the dialog is enforced here and cannot be.
+
+Every tool declares an `outputSchema` and answers with `structuredContent` beside
+the text block, so a client can use a result without parsing prose. The tools
+that report library metadata carry `untrusted: true` and
+`source: "audiobookshelf"` as fields of that object. The documents are described
+as open objects with the top-level keys this server builds: `detail: "full"`
+hands the API record back whole, so a strict shape would turn that mode into a
+failed call.
 
 ## Read tools
 
