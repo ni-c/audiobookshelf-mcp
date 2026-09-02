@@ -84,7 +84,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const url = env.AUDIOBOOKSHELF_URL;
   const apiKey = env.AUDIOBOOKSHELF_API_KEY;
   const insecureTls = env.AUDIOBOOKSHELF_INSECURE_TLS === 'true';
-  const readOnly = env.AUDIOBOOKSHELF_READ_ONLY === 'true';
+  // Deliberately more forgiving than `AUDIOBOOKSHELF_INSECURE_TLS` above, and
+  // the asymmetry is the safety argument rather than an oversight: a misspelt
+  // value here fails *towards* the restriction, so `AUDIOBOOKSHELF_READ_ONLY=1`
+  // in a compose file must not silently register the write tools. The
+  // insecure-TLS switch fails the other way, so it keeps the exact-match rule.
+  const readOnly = /^(1|true|yes)$/i.test(
+    env.AUDIOBOOKSHELF_READ_ONLY?.trim() ?? ''
+  );
   const allowTools = env.AUDIOBOOKSHELF_ALLOW_TOOLS;
   const denyTools = env.AUDIOBOOKSHELF_DENY_TOOLS;
 
@@ -156,7 +163,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   return {
-    url: url.replace(/\/+$/, ''),
+    // Built from the parsed URL, not from the raw string. `new URL()` accepts
+    // more than a base URL may contain, and `fetch` then silently drops the
+    // extra: `https://abs.example.com/#dev` survives validation, loses
+    // everything from the `#` onwards, and every request goes to `/` — where
+    // the web UI answers 200 with HTML. Before the content-type check in
+    // `api.ts` that showed up as empty libraries rather than as an error.
+    // A query string goes the same way, one `?` earlier.
+    url: `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, ''),
     apiKey,
     insecureTls,
     readOnly,

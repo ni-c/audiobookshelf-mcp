@@ -114,6 +114,69 @@ describe('loadConfig', () => {
     expect(config.url).toBe('https://abs.example.com');
   });
 
+  it.each([
+    ['https://abs.example.com/#dev', 'https://abs.example.com'],
+    ['https://abs.example.com/?token=x', 'https://abs.example.com'],
+    ['https://abs.example.com/abs/', 'https://abs.example.com/abs'],
+  ])('builds the base URL from %j as %j', (raw, expected) => {
+    // The base URL used to be the raw string with trailing slashes stripped.
+    // `new URL()` accepts a fragment and a query, so both survived validation —
+    // and `fetch` then silently drops everything from the `#` or the `?`
+    // onwards, sending every request to `/` with the bearer token attached.
+    // Audiobookshelf's web UI answers that with 200 and HTML, and before the
+    // content-type check in api.ts the tools reported empty libraries.
+    const config = loadConfig(
+      env({ AUDIOBOOKSHELF_URL: raw, AUDIOBOOKSHELF_API_KEY: 'k' })
+    );
+    expect(config.url).toBe(expected);
+  });
+
+  it.each(['true', 'TRUE', ' true ', '1', 'yes', 'Yes'])(
+    'reads AUDIOBOOKSHELF_READ_ONLY=%j as on',
+    (value) => {
+      // Read-only fails *towards* the restriction, so every spelling an
+      // operator plausibly writes into a compose file has to close it.
+      const config = loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_READ_ONLY: value,
+        })
+      );
+      expect(config.readOnly).toBe(true);
+    }
+  );
+
+  it.each(['false', '', 'no', '0', 'off'])(
+    'reads AUDIOBOOKSHELF_READ_ONLY=%j as off',
+    (value) => {
+      const config = loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_READ_ONLY: value,
+        })
+      );
+      expect(config.readOnly).toBe(false);
+    }
+  );
+
+  it.each(['1', 'yes', 'TRUE', ' true '])(
+    'leaves AUDIOBOOKSHELF_INSECURE_TLS off for %j',
+    (value) => {
+      // The opposite direction, deliberately: a typo here would relax
+      // certificate validation, so only the exact string counts.
+      const config = loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_INSECURE_TLS: value,
+        })
+      );
+      expect(config.insecureTls).toBe(false);
+    }
+  );
+
   it('rejects a URL containing credentials', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
