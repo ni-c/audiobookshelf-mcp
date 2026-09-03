@@ -1,19 +1,17 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
-import {
-  confirmationPrompt,
-  setResourceKey,
-  type ConfirmationStore,
-} from '../confirm.js';
+import { marked, plain, record } from '../output-schema.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { setResourceKey } from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
   run,
-  textResult,
+  jsonResult,
   untrustedJsonResult,
 } from '../result.js';
+
+import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { confirmTokenParam, detailParam } from '../schema.js';
 import { compactPlaylist, listFrom } from '../shape.js';
 
@@ -70,15 +68,16 @@ export function registerPlaylistReadTools(
         'the playlists of every accessible library. Playlists are private per ' +
         'user and can hold books or podcast episodes; collections are shared ' +
         'server-wide and hold books only.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
           .optional()
           .describe('Restrict the result to this library'),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked({ playlists: z.array(record) }),
     },
     async ({ library_id, detail }) =>
       run(async () => {
@@ -100,11 +99,12 @@ export function registerPlaylistReadTools(
     {
       title: 'Get playlist',
       description: 'Fetches one playlist with its entries, in order.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ playlist_id, detail }) =>
       run(async () => {
@@ -121,7 +121,8 @@ export function registerPlaylistReadTools(
 export function registerPlaylistWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
-  confirmations: ConfirmationStore
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'create_playlist',
@@ -130,7 +131,7 @@ export function registerPlaylistWriteTools(
       description:
         'Creates a playlist for the API key’s user. Unlike a collection it may ' +
         'start out empty and it may hold podcast episodes.',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z
           .string()
           .min(1)
@@ -144,7 +145,15 @@ export function registerPlaylistWriteTools(
         items: playlistItemsParam
           .optional()
           .describe('Initial entries, optional'),
+      }),
+      annotations: {
+        // Additive. Not idempotent: a second call makes a second playlist.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ library_id, name, description, items }) =>
       run(async () => {
@@ -163,12 +172,19 @@ export function registerPlaylistWriteTools(
     {
       title: 'Update playlist',
       description:
-        'Renames a playlist, changes its description or reorders its entries. ' +
-        'items replaces the order completely, so it has to contain every entry ' +
-        'that should stay — use add_items_to_playlist and ' +
-        'remove_items_from_playlist to change membership. The library of a ' +
-        'playlist cannot be changed.',
-      inputSchema: {
+        'Renames a playlist, changes its description or reorders its entries.\n\n' +
+        'items ONLY REORDERS. It cannot add or remove anything, and it must ' +
+        'contain EXACTLY the entries the playlist already has: Audiobookshelf ' +
+        'refuses a list of a different length with HTTP 400 "Invalid playlist ' +
+        'items. Length mismatch". Read the current entries with get_playlist ' +
+        'first, then send them in the order you want. Use ' +
+        'add_items_to_playlist and remove_items_from_playlist to change ' +
+        'membership. The library of a playlist cannot be changed.\n\n' +
+        'Reordering asks a person first, because the order somebody arranged ' +
+        'cannot be reconstructed afterwards; renaming and re-describing do ' +
+        'not. Where the client cannot show a dialog, call once to receive a ' +
+        'token and again with it.',
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         name: z.string().min(1).max(255).optional().describe('New name'),
         description: z
@@ -178,10 +194,23 @@ export function registerPlaylistWriteTools(
           .describe('New description'),
         items: playlistItemsParam
           .optional()
-          .describe('Complete, newly ordered list of entries'),
+          .describe(
+            'Exactly the entries the playlist already has, in the order you ' +
+              'want them. Reorders only; a list of a different length is ' +
+              'refused with HTTP 400.'
+          ),
+        confirm_token: confirmTokenParam,
+      }),
+      annotations: {
+        // Replaces a name and description somebody typed, with no history.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
+      outputSchema: marked(),
     },
-    async ({ playlist_id, name, description, items }) =>
+    async ({ playlist_id, name, description, items, confirm_token }, mcp) =>
       run(async () => {
         if (
           name === undefined &&
@@ -192,14 +221,61 @@ export function registerPlaylistWriteTools(
             'Nothing to update: pass name, description or items.'
           );
         }
-        const updated = await api.patch(
-          `/api/playlists/${assertPathSegment(playlist_id, 'playlist_id')}`,
-          {
-            ...(name !== undefined ? { name } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(items !== undefined ? { items: toApiItems(items) } : {}),
+        const safePlaylist = assertPathSegment(playlist_id, 'playlist_id');
+        const entries = items === undefined ? undefined : toApiItems(items);
+
+        // The gate hangs off the *effect*, not off the verb — see the longer
+        // note in `update_collection`. Measured against 2.29.0, `items` is a
+        // reorder and nothing else: the controller refuses a list whose length
+        // differs from the playlist's with `400 Invalid playlist items. Length
+        // mismatch`, so this cannot drop an entry even in principle. What it
+        // does replace is the order somebody arranged, which is what
+        // `remove_items_from_playlist` names as its own reason for asking.
+        if (entries !== undefined) {
+          const outcome = await approval.requestApproval(
+            server,
+            mcp,
+            confirmations,
+            {
+              // Ids only: a playlist name is user-controlled content and this
+              // string is read by a model as well as by a person.
+              what: `reorder the ${entries.length} entries of playlist ${safePlaylist}`,
+              consequence:
+                'The order somebody arranged is replaced and cannot be ' +
+                'reconstructed from here. Nothing leaves the playlist: ' +
+                'Audiobookshelf refuses a list that is not exactly the current ' +
+                'entries.',
+              // Each target carries its position. `setResourceKey` sorts its
+              // list before fingerprinting, so an unprefixed list would give
+              // [A, B] and [B, A] the same key — and the order *is* the change
+              // this tool makes.
+              resourceKey: setResourceKey('update_playlist:items', [
+                `playlist:${safePlaylist}`,
+                ...entries.map(
+                  (entry, index) =>
+                    `${index}:${String(entry.libraryItemId)}/${String(entry.episodeId ?? '')}`
+                ),
+              ]),
+              token: confirm_token,
+              toolName: 'update_playlist',
+              hint: 'Tick to go ahead, leave it to cancel.',
+            }
+          );
+          if (outcome.decision === 'rejected')
+            return errorResult(outcome.reason);
+          if (outcome.decision === 'declined') {
+            return errorResult(
+              'The user declined. update_playlist did nothing.'
+            );
           }
-        );
+          if (outcome.decision === 'pending') return outcome.result;
+        }
+
+        const updated = await api.patch(`/api/playlists/${safePlaylist}`, {
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(entries !== undefined ? { items: entries } : {}),
+        });
         return untrustedJsonResult(compactPlaylist(updated));
       })
   );
@@ -212,10 +288,19 @@ export function registerPlaylistWriteTools(
         'Appends books or podcast episodes to a playlist. All entries must come ' +
         'from the playlist’s library and match its kind — a podcast playlist ' +
         'needs an episode_id on every entry, a book playlist on none.',
-      inputSchema: {
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
+      }),
+      annotations: {
+        // Additive, and unlike a collection a playlist is an ordered list:
+        // adding the same item twice leaves it in twice.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
+      outputSchema: marked(),
     },
     async ({ playlist_id, items }) =>
       run(async () => {
@@ -235,17 +320,58 @@ export function registerPlaylistWriteTools(
         'Removes entries from a playlist. The media itself is untouched and the ' +
         'entries can be added back with add_items_to_playlist. Note that ' +
         'Audiobookshelf deletes a playlist automatically once its last entry is ' +
-        'removed.',
-      inputSchema: {
+        'removed. Asks a person first; where the client cannot show a dialog, ' +
+        'call once to receive a token and again with it.',
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         items: playlistItemsParam.min(1),
+        confirm_token: confirmTokenParam,
+      }),
+      annotations: {
+        // Idempotent: removing an item that is already out leaves the same
+        // playlist.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      annotations: { destructiveHint: true },
+      outputSchema: marked(),
     },
-    async ({ playlist_id, items }) =>
+    async ({ playlist_id, items, confirm_token }, mcp) =>
       run(async () => {
+        const safeId = assertPathSegment(playlist_id, 'playlist_id');
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            // Ids only: a playlist name is user-controlled content and this
+            // string is read by a model as well as by a person.
+            what: `remove ${items.length} entr${items.length === 1 ? 'y' : 'ies'} from playlist ${safeId}`,
+            consequence:
+              'Audiobookshelf deletes a playlist outright once its last entry ' +
+              'is removed, and a deleted playlist cannot be restored. Where ' +
+              'entries remain, adding them back appends them at the end — the ' +
+              'order is not recoverable from here.',
+            resourceKey: setResourceKey('remove_items_from_playlist', [
+              safeId,
+              ...items.map((item) => JSON.stringify(item)),
+            ]),
+            token: confirm_token,
+            toolName: 'remove_items_from_playlist',
+            hint: 'Tick to go ahead, leave it to cancel.',
+          }
+        );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            'The user declined. remove_items_from_playlist did nothing.'
+          );
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
         const updated = await api.post(
-          `/api/playlists/${assertPathSegment(playlist_id, 'playlist_id')}/batch/remove`,
+          `/api/playlists/${safeId}/batch/remove`,
           { items: toApiItems(items) }
         );
         const shaped = compactPlaylist(updated);
@@ -271,40 +397,56 @@ export function registerPlaylistWriteTools(
     {
       title: 'Delete playlist',
       description:
-        'Deletes a playlist. The media stays in the library. Two-step: the first ' +
-        'call returns a confirmation token, the second call with that token ' +
-        'performs the deletion.',
-      inputSchema: {
+        'Deletes a playlist. The media stays in the library. ' +
+        'Asks a person first; where the client cannot show a dialog, call once ' +
+        'to receive a token and again with it.',
+      inputSchema: z.object({
         playlist_id: playlistIdParam,
         confirm_token: confirmTokenParam,
+      }),
+      annotations: {
+        // Idempotent by the specification's wording.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      annotations: { destructiveHint: true },
+      outputSchema: plain({ deleted_playlist_id: z.string() }),
     },
-    async ({ playlist_id, confirm_token }) =>
+    async ({ playlist_id, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(playlist_id, 'playlist_id');
         const resource = setResourceKey('delete_playlist', [safeId]);
 
-        if (!confirmations.consume(resource, confirm_token)) {
-          if (confirm_token !== undefined) {
-            return errorResult(
-              'The confirmation token is invalid, expired or was issued for a ' +
-                'different playlist. Call delete_playlist without a token to get ' +
-                'a new one.'
-            );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete playlist ${safeId}`,
+            consequence:
+              'The playlist cannot be restored from here. The items it held are ' +
+              'not deleted.',
+            resourceKey: resource,
+            token: confirm_token,
+            toolName: 'delete_playlist',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
-          const token = confirmations.issue(resource);
-          return textResult(
-            confirmationPrompt(
-              `delete playlist ${safeId}`,
-              token,
-              confirmations.ttlMinutes
-            )
-          );
+        );
+        // A token that was sent and did not match is refused with the reason
+        // rather than answered with a fresh prompt; the sentence is the
+        // library's, so every server refuses in the same words.
+        if (outcome.decision === 'rejected') {
+          return errorResult(outcome.reason);
         }
+        if (outcome.decision === 'declined') {
+          return errorResult(`The user declined. delete_playlist did nothing.`);
+        }
+        if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/playlists/${safeId}`);
-        return textResult(`Playlist ${safeId} deleted.`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/playlists/${safeId}`, { text: true });
+        return jsonResult({ deleted_playlist_id: safeId });
       })
   );
 }

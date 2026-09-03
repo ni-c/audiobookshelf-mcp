@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 
 import type { Config } from '../src/config.js';
 import { createServer } from '../src/server.js';
@@ -11,6 +9,9 @@ const config: Config = {
   apiKey: 'test-key',
   insecureTls: false,
   readOnly: false,
+  elicitation: true,
+  allowTools: undefined,
+  denyTools: undefined,
 };
 
 /**
@@ -35,16 +36,43 @@ const GENERIC_BODY = {
   total: 0,
 };
 
-async function connect(overrides: Partial<Config> = {}): Promise<Client> {
+/** How a client that can show a dialog answers it. */
+type ElicitBehaviour = 'accept' | 'decline' | 'cancel';
+
+/**
+ * Connects a client to the real server.
+ *
+ * Without `elicit` the client declares no elicitation capability, which is the
+ * case the two-call token exists for and what every other test here drives.
+ * With it, the client answers the dialog and `prompts` records what the server
+ * put in front of the user.
+ */
+async function connect(
+  overrides: Partial<Config> = {},
+  elicit?: ElicitBehaviour
+): Promise<Client & { prompts: string[] }> {
   const server = createServer({ ...config, ...overrides });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test', version: '0.0.0' });
+  const prompts: string[] = [];
+  const client = new Client(
+    { name: 'test', version: '0.0.0' },
+    elicit === undefined ? {} : { capabilities: { elicitation: {} } }
+  );
+  if (elicit !== undefined) {
+    client.setRequestHandler('elicitation/create', (request) => {
+      const params = request.params as { message?: string };
+      prompts.push(params.message ?? '');
+      if (elicit === 'cancel') return { action: 'cancel' };
+      if (elicit === 'decline') return { action: 'decline' };
+      return { action: 'accept', content: { confirm: true } };
+    });
+  }
   await Promise.all([
     client.connect(clientTransport),
     server.connect(serverTransport),
   ]);
-  return client;
+  return Object.assign(client, { prompts });
 }
 
 function mockFetch(body: unknown = GENERIC_BODY) {
@@ -123,8 +151,11 @@ const READ_CALLS: [string, Record<string, unknown>, string][] = [
   ['get_listening_stats', {}, '/api/me/listening-stats'],
   ['get_year_stats', { year: 2026 }, '/api/me/stats/year/2026'],
   ['list_listening_sessions', {}, '/api/me/listening-sessions'],
-  ['list_bookmarks', {}, '/api/me/bookmarks'],
-  ['list_bookmarks', { library_item_id: 'li_1' }, '/api/me/bookmarks/li_1'],
+  // Both read /api/me: Audiobookshelf has no bookmarks endpoint, and the
+  // filtering by library item happens in this server. Verified against 2.29.0,
+  // where /api/me/bookmarks is a 404 with or without an id after it.
+  ['list_bookmarks', {}, '/api/me'],
+  ['list_bookmarks', { library_item_id: 'li_1' }, '/api/me'],
   ['list_collections', {}, '/api/collections'],
   [
     'list_collections',
@@ -262,11 +293,10 @@ describe('write tools', () => {
     });
   });
 
-  it('updates and reorders a collection', async () => {
+  it('updates and reorders a collection, after asking', async () => {
     const spy = mockFetch();
-    await (
-      await connect()
-    ).callTool({
+    const client = await connect({}, 'accept');
+    await client.callTool({
       name: 'update_collection',
       arguments: {
         collection_id: 'col_1',
@@ -274,11 +304,98 @@ describe('write tools', () => {
         library_item_ids: ['li_2', 'li_1'],
       },
     });
+    expect(client.prompts).toHaveLength(1);
     expect(callsOf(spy)[0]).toMatchObject({
       method: 'PATCH',
       body: { name: 'Renamed', books: ['li_2', 'li_1'] },
     });
   });
+
+  it.each([
+    [
+      'update_collection',
+      { collection_id: 'col_1', name: 'Renamed' },
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'update_playlist',
+      { playlist_id: 'pl_1', description: 'New' },
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s asks only for the half that replaces a curated order',
+    async (name, rename, reorder) => {
+      // The gate tests all iterate over the tools that are *known* to ask;
+      // nobody asked it the other way round, which is how a tool named as an
+      // update stayed ungated while its `library_item_ids` / `items` argument
+      // replaced an order that cannot be reconstructed — the very consequence
+      // `remove_books_from_collection` cites for asking. Renaming stays free:
+      // it is recoverable by typing the old text back.
+      //
+      // What this does NOT claim, because it is not true of 2.29.0: that the
+      // argument changes membership. It sorts what is already there.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+
+      await client.callTool({ name, arguments: rename });
+      expect(client.prompts, 'a rename must not ask').toHaveLength(0);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      await client.callTool({ name, arguments: reorder });
+      expect(client.prompts, 'a reorder must ask').toHaveLength(1);
+      expect(client.prompts[0]).toMatch(/cannot be reconstructed from here/);
+      expect(client.prompts[0]).toMatch(/Nothing leaves the/);
+    }
+  );
+
+  it.each([
+    [
+      'update_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+      { collection_id: 'col_1', library_item_ids: ['li_2', 'li_1'] },
+    ],
+    [
+      'update_playlist',
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_1' }, { library_item_id: 'li_2' }],
+      },
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_2' }, { library_item_id: 'li_1' }],
+      },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s binds its token to the order, not just to the set',
+    async (name, args, reordered) => {
+      // `setResourceKey` sorts its target list before fingerprinting, so a
+      // bare list of ids would give [A, B] and [B, A] the same key — and the
+      // order is precisely what this half of the tool changes. Each target
+      // carries its position.
+      const spy = mockFetch();
+      const client = await connect();
+
+      const first = await client.callTool({ name, arguments: args });
+      expect(spy).not.toHaveBeenCalled();
+      const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
+      expect(token).toBeDefined();
+
+      const wrong = await client.callTool({
+        name,
+        arguments: { ...reordered, confirm_token: token },
+      });
+      expect(wrong.isError).toBe(true);
+      expect(firstText(wrong)).toContain('issued for different arguments');
+      expect(spy).not.toHaveBeenCalled();
+
+      const second = await client.callTool({
+        name,
+        arguments: { ...args, confirm_token: token },
+      });
+      expect(second.isError).toBeFalsy();
+      expect(spy).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('refuses an update without any field', async () => {
     const spy = mockFetch();
@@ -299,12 +416,6 @@ describe('write tools', () => {
       'add_books_to_collection',
       { collection_id: 'col_1', library_item_ids: ['li_1'] },
       '/api/collections/col_1/batch/add',
-      { books: ['li_1'] },
-    ],
-    [
-      'remove_books_from_collection',
-      { collection_id: 'col_1', library_item_ids: ['li_1'] },
-      '/api/collections/col_1/batch/remove',
       { books: ['li_1'] },
     ],
     [
@@ -369,9 +480,136 @@ describe('write tools', () => {
     });
   });
 
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+      '/api/collections/col_1/batch/remove',
+      { books: ['li_1'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+      '/api/playlists/pl_1/batch/remove',
+      { items: [{ libraryItemId: 'li_1' }] },
+    ],
+  ] as [string, Record<string, unknown>, string, unknown][])(
+    '%s posts to %s, but only once a person has agreed',
+    async (name, args, path, body) => {
+      // Both take something out of a list somebody curated, and both used to
+      // go through unannounced while carrying destructiveHint: true.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+      const result = await client.callTool({ name, arguments: args });
+
+      expect(client.prompts).toHaveLength(1);
+      expect(result.isError).toBeFalsy();
+      const call = callsOf(spy)[0]!;
+      expect(new URL(call.url).pathname).toBe(path);
+      expect(call.method).toBe('POST');
+      expect(call.body).toEqual(body);
+    }
+  );
+
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
+    ['delete_bookmark', { library_item_id: 'li_1', time: 90 }],
+    ['delete_collection', { collection_id: 'col_1' }],
+    ['delete_playlist', { playlist_id: 'pl_1' }],
+    ['delete_media_progress', { media_progress_id: 'mp_1' }],
+    [
+      'update_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+    ],
+    [
+      'update_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+    ],
+  ] as [string, Record<string, unknown>][])(
+    '%s removes nothing when the person declines',
+    async (name, args) => {
+      const spy = mockFetch();
+      const client = await connect({}, 'decline');
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError).toBe(true);
+      expect(spy).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [
+      'remove_books_from_collection',
+      { collection_id: 'col_1', library_item_ids: ['li_1'] },
+      { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+    ],
+    [
+      'remove_items_from_playlist',
+      { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
+      {
+        playlist_id: 'pl_1',
+        items: [{ library_item_id: 'li_1' }, { library_item_id: 'li_2' }],
+      },
+    ],
+    [
+      'delete_bookmark',
+      { library_item_id: 'li_1', time: 90 },
+      { library_item_id: 'li_1', time: 120 },
+    ],
+  ] as [string, Record<string, unknown>, Record<string, unknown>][])(
+    '%s falls back to a token, bound to the exact targets',
+    async (name, args, widened) => {
+      // No elicitation capability: this is the path a stateless gateway takes.
+      const spy = mockFetch();
+      const client = await connect();
+
+      const first = await client.callTool({ name, arguments: args });
+      expect(spy).not.toHaveBeenCalled();
+      const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
+      expect(token).toBeDefined();
+
+      // The same token against a wider set is refused with the reason, not
+      // answered with a fresh prompt: the key names the exact targets.
+      const wrong = await client.callTool({
+        name,
+        arguments: { ...widened, confirm_token: token },
+      });
+      expect(wrong.isError).toBe(true);
+      expect(firstText(wrong)).toContain('issued for different arguments');
+      expect(spy).not.toHaveBeenCalled();
+
+      const second = await client.callTool({
+        name,
+        arguments: { ...args, confirm_token: token },
+      });
+      expect(second.isError).toBeFalsy();
+      expect(spy).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('keeps a user-chosen name out of the sentence it asks with', async () => {
+    // Collection and playlist names are content somebody typed, and the prompt
+    // is read by a model as well as by a person — so the prompts name ids and
+    // counts only.
+    const client = await connect({}, 'decline');
+    await client.callTool({
+      name: 'remove_books_from_collection',
+      arguments: { collection_id: 'col_1', library_item_ids: ['li_1', 'li_2'] },
+    });
+    expect(client.prompts[0]).toContain(
+      'remove 2 book(s) from collection col_1'
+    );
+  });
+
   it('manages bookmarks', async () => {
     const spy = mockFetch();
-    const client = await connect();
+    const client = await connect({}, 'accept');
 
     await client.callTool({
       name: 'create_bookmark',
@@ -436,15 +674,81 @@ describe('write tools', () => {
       expect(call.method).toBe('DELETE');
       expect(new URL(call.url).pathname).toBe(path);
 
-      // The token is single-use: replaying it must not delete again.
+      // The token is single-use: replaying it must not delete again, and the
+      // refusal now says why rather than handing out a fresh prompt.
       const replay = await client.callTool({
         name,
         arguments: { [idParam]: id, confirm_token: token },
       });
       expect(replay.isError).toBe(true);
+      expect(firstText(replay)).toContain('invalid, expired');
       expect(spy).toHaveBeenCalledTimes(1);
     }
   );
+
+  it.each([
+    ['delete_collection', 'collection_id', 'col_1', '/api/collections/col_1'],
+    ['delete_playlist', 'playlist_id', 'pl_1', '/api/playlists/pl_1'],
+    [
+      'delete_media_progress',
+      'media_progress_id',
+      'mp_1',
+      '/api/me/progress/mp_1',
+    ],
+  ])(
+    '%s asks the user, and deletes once they accept',
+    async (name, idParam, id, path) => {
+      // The point of the approval path: a client that can put a question in front
+      // of a person gets asked, instead of a token that only proves the same call
+      // was made twice.
+      const spy = mockFetch();
+      const client = await connect({}, 'accept');
+      const result = await client.callTool({
+        name,
+        arguments: { [idParam]: id },
+      });
+      expect(client.prompts).toHaveLength(1);
+      expect(result.isError).toBeFalsy();
+      expect(new URL(callsOf(spy)[0]!.url).pathname).toBe(path);
+    }
+  );
+
+  it('deletes nothing when the user declines', async () => {
+    const spy = mockFetch();
+    const client = await connect({}, 'decline');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(result.isError).toBe(true);
+    expect(firstText(result)).toContain('declined');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('deletes nothing when the user closes the dialog', async () => {
+    // Cancel is not a yes: for an irreversible delete the only safe reading of
+    // "no answer" is no.
+    const spy = mockFetch();
+    const client = await connect({}, 'cancel');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(result.isError).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('offers no token to a client it can ask properly', async () => {
+    // The control that makes the cases above mean something: the token path is
+    // unchanged, so a server that silently never asked would pass all of them.
+    mockFetch();
+    const client = await connect({}, 'decline');
+    const result = await client.callTool({
+      name: 'delete_collection',
+      arguments: { collection_id: 'col_1' },
+    });
+    expect(firstText(result)).not.toContain('confirm_token');
+  });
 });
 
 /** Text of the first content block of a tool result. */
@@ -453,14 +757,32 @@ function firstText(result: unknown): string {
   return content[0]?.text ?? '';
 }
 
-/** The JSON payload of a result, with the untrusted-content preamble stripped. */
+/**
+ * The payload of a result, minus the two marker fields — and a check that the
+ * text block says the same thing.
+ *
+ * The specification's rule is that `content` and `structuredContent` are the
+ * same information in two presentations, and nothing enforces it. Every
+ * assertion in this suite goes through here, so every one of them also asserts
+ * the two agree.
+ */
 function payload(result: unknown): Record<string, unknown> {
   const text = firstText(result);
+  const structured = (result as { structuredContent?: Record<string, unknown> })
+    .structuredContent;
+  if (structured === undefined) {
+    throw new Error(
+      `no structuredContent — the tool answered: ${text.slice(0, 300)}`
+    );
+  }
   const start = text.indexOf('{');
-  return JSON.parse(text.slice(start === -1 ? 0 : start)) as Record<
+  const fromText = JSON.parse(text.slice(start === -1 ? 0 : start)) as Record<
     string,
     unknown
   >;
+  expect(structured, 'structuredContent vs. text').toEqual(fromText);
+  const { untrusted: _untrusted, source: _source, ...rest } = fromText;
+  return rest;
 }
 
 describe('projections in the read tools', () => {
@@ -499,9 +821,13 @@ describe('projections in the read tools', () => {
       arguments: { library_id: 'lib_1' },
     });
 
-    const shelves = JSON.parse(
-      firstText(result).slice(firstText(result).indexOf('['))
-    ) as { type: string; entities: Record<string, unknown>[] }[];
+    // Wrapped in `{items}`: a bare array as the root of an output schema is
+    // served to a 2025-era client rewritten as `{result: …}`.
+    const shelves = (
+      payload(result) as {
+        items: { type: string; entities: Record<string, unknown>[] }[];
+      }
+    ).items;
     expect(shelves).toHaveLength(2);
     // A book shelf is projected...
     expect(shelves[0]!.entities[0]).toEqual({
@@ -660,7 +986,7 @@ describe('write tool edge cases', () => {
 
     const calls = callsOf(spy);
     expect(calls.map((c) => c.method)).toEqual(['PATCH', 'GET']);
-    expect(firstText(result)).toMatch(/^Progress updated\./);
+    expect(payload(result)).toMatchObject({ updated: true });
     expect(firstText(result)).toContain('"currentTime": 120');
   });
 
@@ -679,7 +1005,7 @@ describe('write tool edge cases', () => {
   it('says so when removing the last entry deleted the playlist', async () => {
     mockFetch({ id: 'pl_1', name: 'Roadtrip', items: [] });
     const result = await (
-      await connect()
+      await connect({}, 'accept')
     ).callTool({
       name: 'remove_items_from_playlist',
       arguments: { playlist_id: 'pl_1', items: [{ library_item_id: 'li_1' }] },
@@ -718,5 +1044,50 @@ describe('write tool edge cases', () => {
       name: 'Y',
       items: [],
     });
+  });
+});
+
+describe('list_bookmarks', () => {
+  // Audiobookshelf has no bookmarks endpoint: `/api/me/bookmarks` is a 404
+  // with or without an item id after it, verified against 2.29.0. Bookmarks
+  // are a field on the account, so the filtering happens here — which means it
+  // has to be tested here too.
+  const ME = {
+    id: 'u_1',
+    username: 'reader',
+    bookmarks: [
+      { libraryItemId: 'li_1', title: 'First', time: 12 },
+      { libraryItemId: 'li_2', title: 'Second', time: 34 },
+      { libraryItemId: 'li_1', title: 'Third', time: 56 },
+    ],
+  };
+
+  it('returns every bookmark of the account when no item is given', async () => {
+    mockFetch(ME);
+    const client = await connect();
+    const result = payload(
+      await client.callTool({ name: 'list_bookmarks', arguments: {} })
+    ) as { numBookmarks: number };
+    expect(result.numBookmarks).toBe(3);
+  });
+
+  it('filters by library item, without asking the server to', async () => {
+    const spy = mockFetch(ME);
+    const client = await connect();
+    const result = payload(
+      await client.callTool({
+        name: 'list_bookmarks',
+        arguments: { library_item_id: 'li_1' },
+      })
+    ) as { numBookmarks: number; bookmarks: { title: string }[] };
+
+    expect(result.numBookmarks).toBe(2);
+    expect(result.bookmarks.map((b) => b.title)).toEqual(['First', 'Third']);
+    // The request that fetched the bookmarks is /api/me, and it does not
+    // carry the item id — the per-item route it would otherwise use does not
+    // exist upstream.
+    const bookmarkCall = callsOf(spy).at(-1)!;
+    expect(bookmarkCall.url).toContain('/api/me');
+    expect(bookmarkCall.url).not.toContain('li_1');
   });
 });

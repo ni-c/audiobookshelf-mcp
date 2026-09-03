@@ -1,23 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 
 import type { Config } from '../src/config.js';
 import { createServer } from '../src/server.js';
+import { expectPortableToolSchemas } from 'mcp-integration-harness';
 
 const config: Config = {
   url: 'https://abs.example.com',
   apiKey: 'test-key',
   insecureTls: false,
   readOnly: false,
+  elicitation: true,
+  allowTools: undefined,
+  denyTools: undefined,
 };
 
-async function connect(overrides: Partial<Config> = {}): Promise<Client> {
+async function connect(
+  overrides: Partial<Config> = {},
+  // Omitted means the client declares no elicitation capability. Passing
+  // 'accept' answers every dialog with a yes, which is how a test about
+  // something *after* the guard gets past it.
+  elicit?: 'accept' | 'decline'
+): Promise<Client> {
   const server = createServer({ ...config, ...overrides });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test', version: '0.0.0' });
+  const client = new Client(
+    { name: 'test', version: '0.0.0' },
+    elicit === undefined ? {} : { capabilities: { elicitation: {} } }
+  );
+  if (elicit !== undefined) {
+    client.setRequestHandler('elicitation/create', () =>
+      elicit === 'decline'
+        ? { action: 'decline' }
+        : { action: 'accept', content: { confirm: true } }
+    );
+  }
   await Promise.all([
     client.connect(clientTransport),
     server.connect(serverTransport),
@@ -119,6 +137,158 @@ describe('server', () => {
     const writeTool = tools.find((t) => t.name === 'delete_collection');
     expect(writeTool?.annotations?.readOnlyHint).not.toBe(true);
     expect(writeTool?.annotations?.destructiveHint).toBe(true);
+  });
+
+  it('declares an output schema on every tool', async () => {
+    // The same argument as the annotations below, one field along. A tool that
+    // says nothing about its result forces a client to parse prose to find out
+    // what it got, and the SDK sends no `structuredContent` at all for a tool
+    // that declared no schema — seven tools here answered with a sentence.
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.outputSchema, tool.name).toBeDefined();
+      // An object root, not merely a schema. SEP-2106 allows an array or a
+      // scalar, but a 2025-era client is served that same tool with the schema
+      // rewritten to `{result: …}` — which is why get_personalized_shelves
+      // answers `{items}` rather than the array the API sends.
+      expect(tool.outputSchema?.type, tool.name).toBe('object');
+    }
+  });
+
+  it('advertises schemas every client can read', async () => {
+    // Legal JSON Schema is not enough. `{}` in a schema position — what zod
+    // writes for `looseObject`, `catchall` and `z.unknown()` — and `type` as an
+    // array are both refused, or silently dropped, by some clients. Neither is
+    // a contract: each has an equivalent spelling that says the same thing, so
+    // there is nothing here to excuse.
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expectPortableToolSchemas(tools);
+  });
+
+  it('marks the results built from library metadata as untrusted', async () => {
+    // Book descriptions pulled from metadata providers, podcast feed summaries
+    // and episode titles are all written by someone else. A client that reads
+    // only `structuredContent` must not get them unframed.
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const plainTools = tools
+      .filter((tool) => {
+        const properties = tool.outputSchema?.properties as
+          Record<string, unknown> | undefined;
+        return properties?.untrusted === undefined;
+      })
+      .map((tool) => tool.name)
+      .sort();
+    // The ones whose answer is this server's own: an id it was given, the
+    // account it authenticates as, counters the instance keeps about itself.
+    expect(plainTools).toEqual(
+      [
+        'delete_collection',
+        'delete_media_progress',
+        'delete_playlist',
+        'delete_bookmark',
+        'get_library',
+        'get_library_stats',
+        'get_me',
+        'get_media_progress',
+        'get_server_status',
+        'list_libraries',
+      ].sort()
+    );
+  });
+
+  it('declares all four annotation hints on every tool', async () => {
+    // Not a style rule. Two of the four default to a *stronger* claim than
+    // silence suggests: the specification gives destructiveHint and
+    // openWorldHint a default of true, so a tool that omits them announces
+    // itself as destructive and open-world. Nine tools here had no
+    // annotations block at all, which is that claim in its loudest form.
+    const tools = (await (await connect()).listTools()).tools;
+    const hints = [
+      'readOnlyHint',
+      'destructiveHint',
+      'idempotentHint',
+      'openWorldHint',
+    ] as const;
+    for (const tool of tools) {
+      for (const hint of hints) {
+        expect(typeof tool.annotations?.[hint], `${tool.name}.${hint}`).toBe(
+          'boolean'
+        );
+      }
+    }
+  });
+
+  it('warns only where something written is lost', async () => {
+    // The line: content a person typed, replaced with no way back, is
+    // destructive; a marker or a membership is not. Six of the fifteen write
+    // tools used to inherit destructiveHint: true from the default, including
+    // three called create_*.
+    const tools = (await (await connect()).listTools()).tools;
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    for (const additive of [
+      'create_collection',
+      'create_playlist',
+      'create_bookmark',
+      'add_books_to_collection',
+      'add_items_to_playlist',
+      'set_media_progress',
+    ]) {
+      expect(byName.get(additive)?.destructiveHint, additive).toBe(false);
+    }
+    for (const destructive of [
+      'update_collection',
+      'update_playlist',
+      'update_bookmark',
+      'remove_books_from_collection',
+      'remove_items_from_playlist',
+      'delete_collection',
+      'delete_playlist',
+      'delete_bookmark',
+      'delete_media_progress',
+    ]) {
+      expect(byName.get(destructive)?.destructiveHint, destructive).toBe(true);
+    }
+  });
+
+  it('guards every tool that can drop a curated membership', async () => {
+    // Written as the whole set rather than tool by tool, because the finding
+    // was a hole *between* two tools. `remove_books_from_collection` asked and
+    // `update_collection` reached the same end state without a question — its
+    // `library_item_ids` is sent as the complete membership, so every book left
+    // out of it leaves the collection. The gate boundary ran between verbs
+    // instead of between effects, and the per-tool gate tests all iterate over
+    // the tools that are known to ask, so none of them could see it.
+    //
+    // `confirm_token` in the schema is the observable half of the guard: no
+    // tool declares it without going through `requestApproval`.
+    const tools = (await (await connect()).listTools()).tools;
+    const guarded = tools
+      .filter((tool) => 'confirm_token' in (tool.inputSchema.properties ?? {}))
+      .map((tool) => tool.name)
+      .sort();
+    expect(guarded).toEqual([
+      'delete_bookmark',
+      'delete_collection',
+      'delete_media_progress',
+      'delete_playlist',
+      'remove_books_from_collection',
+      'remove_items_from_playlist',
+      'update_collection',
+      'update_playlist',
+    ]);
+  });
+
+  it('tells a set apart from an ordered list', async () => {
+    // A collection holds each book once, so adding one it already has changes
+    // nothing. A playlist is ordered and takes the same item twice.
+    const tools = (await (await connect()).listTools()).tools;
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    expect(byName.get('add_books_to_collection')?.idempotentHint).toBe(true);
+    expect(byName.get('add_items_to_playlist')?.idempotentHint).toBe(false);
   });
 
   it('rejects a path-traversal id before calling the API', async () => {
@@ -315,7 +485,7 @@ describe('server', () => {
   it('warns that an emptied playlist was deleted by the server', async () => {
     mockJson({ id: 'pl_1', name: 'Roadtrip', items: [] });
     const result = await (
-      await connect()
+      await connect({}, 'accept')
     ).callTool({
       name: 'remove_items_from_playlist',
       arguments: {

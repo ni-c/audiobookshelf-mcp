@@ -480,6 +480,45 @@ describe('compactCollection', () => {
       { id: 'li_1', mediaType: 'book', title: 'A' },
       { id: 'li_2', mediaType: 'book', title: 'B' },
     ]);
+    expect(collection.booksTruncated).toBeUndefined();
+  });
+
+  it('embeds only the first entries of a large collection', () => {
+    // `books` was mapped unconditionally — not behind `detail`, not behind a
+    // count. `/api/collections` does not paginate, so forty collections of
+    // three hundred books meant twelve thousand embedded items in one *default*
+    // read. `numBooks` already says how many there are, and whoever wants the
+    // whole membership asks for the one collection with `get_collection`.
+    const collection = compactCollection({
+      id: 'col_1',
+      books: Array.from({ length: 300 }, (_, i) => ({
+        id: `li_${i}`,
+        mediaType: 'book',
+        media: { metadata: { title: `T${i}` } },
+      })),
+    });
+    expect(collection.numBooks).toBe(300);
+    expect(collection.books).toHaveLength(25);
+    expect(collection.booksTruncated).toMatch(/first 25 of 300 books/);
+    expect(collection.booksTruncated).toMatch(/get_collection/);
+  });
+
+  it('embeds only the first entries of a large playlist', () => {
+    const playlist = compactPlaylist({
+      id: 'pl_1',
+      items: Array.from({ length: 300 }, (_, i) => ({
+        libraryItemId: `li_${i}`,
+        libraryItem: {
+          id: `li_${i}`,
+          mediaType: 'book',
+          media: { metadata: { title: `T${i}` } },
+        },
+      })),
+    });
+    expect(playlist.numItems).toBe(300);
+    expect(playlist.items).toHaveLength(25);
+    expect(playlist.itemsTruncated).toMatch(/first 25 of 300 items/);
+    expect(playlist.itemsTruncated).toMatch(/get_playlist/);
   });
 });
 

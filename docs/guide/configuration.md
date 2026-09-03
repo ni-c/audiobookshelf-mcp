@@ -9,11 +9,20 @@ and no command-line flag.
 | `AUDIOBOOKSHELF_API_KEY`      | yes      | —       | API key, sent as `Authorization: Bearer …`                    |
 | `AUDIOBOOKSHELF_READ_ONLY`    | no       | `false` | `true` registers only the 29 read tools                       |
 | `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates for this connection   |
+| `ELICITATION`                 | no       | `true`  | `false` replaces the approval dialog with the two-call token   |
 
-Only the exact string `true` enables the two booleans. `1`, `yes` and `TRUE` do
-not — which is worth knowing, because a typo in `AUDIOBOOKSHELF_READ_ONLY` fails
-*open*, with the write tools registered. The server logs which switches are active
-at startup; check that line rather than trusting the spelling.
+Only the exact string `true` enables the two `AUDIOBOOKSHELF_*` booleans. `1`,
+`yes` and `TRUE` do not — which is worth knowing, because a typo in
+`AUDIOBOOKSHELF_READ_ONLY` fails *open*, with the write tools registered. The
+server logs which switches are active at startup; check that line rather than
+trusting the spelling.
+
+`ELICITATION` is the exception in both directions: it is case-insensitive, and a
+value that is neither `true` nor `false` **stops the server** instead of falling
+back. It is the only one here that defaults to *on*, so failing open on a typo
+would leave the dialog running while you believed it was off. It also carries no
+prefix, which means it reaches every MCP server in the same environment — see
+[Asking a person](/guide/approval).
 
 See the [environment reference](/reference/environment) for the same table with
 the validation rules.
@@ -82,7 +91,10 @@ Not configurable, deliberately:
 | ------------------- | -------------- | ---------------------------------------------------------------------- |
 | Request timeout     | 15 s           | A hung request would hang the tool call                                |
 | Redirects           | never followed | A redirect would replay the `Authorization` header at another host     |
-| List cap            | 100 entries    | One call must not be able to flood the context                         |
+| Response ceiling    | 5 MB           | `/api/collections` does not paginate and embeds every book             |
+| Result ceiling      | 100 000 bytes  | One call must not be able to flood the context                         |
+| Item-page cap       | 100 entries    | `list_library_items` only; the API pages that route                    |
+| Embedded members    | first 25       | A compact collection or playlist reports the count, not the whole list |
 | Description cap     | 800 characters | Metadata-provider descriptions run to many kB                          |
 | Error body cap      | 2000 chars     | HTML error pages are dropped entirely, other bodies truncated          |
 | Confirm-token TTL   | 5 minutes      | Long enough for a round trip, short enough not to linger               |

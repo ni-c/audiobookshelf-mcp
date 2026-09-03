@@ -53,8 +53,16 @@ the account existed plus the complete media metadata of everything ever played.
 So every tool that returns media answers with a **compact projection** by default:
 the fields that matter for browsing, ids and values matching Audiobookshelf's own
 names, descriptions truncated, embedded blobs dropped. `detail: "full"` gets you
-the raw object when you actually want it. List tools cap at 100 entries and tell
-you how to page on.
+the raw object when you actually want it.
+
+Three bounds sit under that, because the projection alone is not one:
+a **5 MB ceiling** on what is read from the instance, a **100 000-byte ceiling**
+on a tool result — applied in `jsonResult`, so `detail: "full"` is covered too,
+and it drops whole entries rather than characters — and a cap of **25 embedded
+members** in a compact collection or playlist, which report the real count
+alongside. `list_library_items` pages with `limit` and `page`; the other listing
+tools do not, because the Audiobookshelf routes behind them take no paging
+parameters and answer with everything at once.
 
 The practical effect: `get_listening_stats` went from 95 kB to 3.5 kB, and
 `list_series` from 5.3 kB to 0.6 kB, without losing anything you would ask about.

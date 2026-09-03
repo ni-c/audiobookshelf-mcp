@@ -1,15 +1,16 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
-import { errorResult, run, untrustedJsonResult } from '../result.js';
-import { detailParam, libraryItemIdParam } from '../schema.js';
+import { marked, record } from '../output-schema.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   compactLibraryItem,
   compactPodcastEpisode,
   truncateText,
 } from '../shape.js';
+
+import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
+import { errorResult, run, untrustedJsonResult } from '../result.js';
+import { detailParam, libraryItemIdParam } from '../schema.js';
 
 export function registerItemReadTools(
   server: McpServer,
@@ -24,11 +25,12 @@ export function registerItemReadTools(
         'listening progress of the API key’s user. Chapters, audio files and ' +
         'tracks are not part of the compact projection — use get_item_chapters ' +
         'for chapters, or detail="full" for everything.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
@@ -53,10 +55,11 @@ export function registerItemReadTools(
         'Returns the chapter list of a book with start and end times in seconds. ' +
         'Separate from get_library_item because long audiobooks can have hundreds ' +
         'of chapters.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked({ chapters: z.array(record) }),
     },
     async ({ library_item_id }) =>
       run(async () => {
@@ -87,15 +90,16 @@ export function registerItemReadTools(
       description:
         'Fetches one podcast episode with its publication date, duration and ' +
         'description.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: z
           .string()
           .min(1)
           .describe('Library item id of the podcast the episode belongs to'),
         episode_id: z.string().min(1).describe('Podcast episode id'),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -119,7 +123,7 @@ export function registerItemReadTools(
         'Lists the most recently published episodes across a podcast library — ' +
         'the "Newest Episodes" view. Only works on libraries with mediaType ' +
         '"podcast".',
-      inputSchema: {
+      inputSchema: z.object({
         library_id: z.string().min(1).describe('Id of a podcast library'),
         page: z
           .number()
@@ -135,8 +139,9 @@ export function registerItemReadTools(
           .optional()
           .describe('Episodes per page, default 25, max 100'),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ library_id, page, limit, detail }) =>
       run(async () => {

@@ -18,6 +18,25 @@ Every tool that returns media accepts `detail` — `"compact"` (the default)
 returns a projection with the fields that matter for browsing, `"full"`
 returns the raw Audiobookshelf object, which is very large.
 
+👤 marks a tool that **asks a person** before it acts, through MCP
+elicitation — a dialog the model cannot answer on its behalf. Where the
+client cannot show one, it falls back to a two-call `confirm_token`, and
+says which of the two it was. `ELICITATION=false` takes that fallback
+deliberately; it never removes the guard. See
+[Asking a person](/guide/approval).
+
+Every tool declares all four MCP annotations — `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, `openWorldHint`. They are a hint a
+client may ignore; the dialog is enforced here and cannot be.
+
+Every tool declares an `outputSchema` and answers with `structuredContent` beside
+the text block, so a client can use a result without parsing prose. The tools
+that report library metadata carry `untrusted: true` and
+`source: "audiobookshelf"` as fields of that object. The documents are described
+as open objects with the top-level keys this server builds: `detail: "full"`
+hands the API record back whole, so a strict shape would turn that mode into a
+failed call.
+
 ## Read tools
 
 ### `list_libraries`
@@ -293,7 +312,7 @@ The playback sessions of the current user, newest first — each entry is one li
 
 **List bookmarks** — read-only
 
-The bookmarks of the current user — either all of them, or those of one library item. A bookmark is a named position in seconds.
+The bookmarks of the current user — either all of them, or those of one library item. A bookmark is a named position in seconds. Audiobookshelf has no bookmarks endpoint: they are a field on the account, so this reads /api/me and filters here. That is why there is no pagination — you get all of them.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -361,11 +380,11 @@ Creates or updates the listening progress of the API key’s user for one book o
 | `is_finished` | boolean | no | Mark the item as finished (true) or unfinished (false) |
 | `hide_from_continue_listening` | boolean | no | Hide the item from the "Continue Listening" shelf without changing its position |
 
-### `delete_media_progress`
+### `delete_media_progress` 👤
 
 **Delete media progress** — write, destructive
 
-Deletes a progress record of the API key’s user, which removes the listening history for that item — position, finished state and dates. Takes the media progress id (field "id" of get_media_progress), not the library item id. Two-step: the first call returns a confirmation token, the second call with that token performs the deletion.
+Deletes a progress record of the API key’s user, which removes the listening history for that item — position, finished state and dates. Takes the media progress id (field "id" of get_media_progress), not the library item id. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -386,7 +405,7 @@ Creates a bookmark at a position of a book for the API key’s user. The positio
 
 ### `update_bookmark`
 
-**Update bookmark** — write
+**Update bookmark** — write, destructive
 
 Renames the bookmark at a given position. The position itself cannot be changed — delete the bookmark and create a new one for that.
 
@@ -396,16 +415,17 @@ Renames the bookmark at a given position. The position itself cannot be changed 
 | `time` | number | yes | Position in seconds identifying the bookmark |
 | `title` | string | yes | New bookmark title |
 
-### `delete_bookmark`
+### `delete_bookmark` 👤
 
 **Delete bookmark** — write, destructive
 
-Deletes the bookmark at a given position. No confirmation token: a bookmark is a position and a title, and create_bookmark restores it.
+Deletes the bookmark at a given position. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `library_item_id` | string | yes | Library item id, as returned by list_library_items or search_library |
 | `time` | number | yes | Position in seconds identifying the bookmark |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
 ### `create_collection`
 
@@ -420,18 +440,19 @@ Creates a collection of books. Audiobookshelf rejects empty collections, so at l
 | `description` | string | no | Optional description |
 | `library_item_ids` | string[] | yes | Library item ids of books |
 
-### `update_collection`
+### `update_collection` 👤
 
-**Update collection** — write
+**Update collection** — write, destructive
 
-Renames a collection, changes its description or reorders its books. library_item_ids replaces the order completely, so it has to contain every item that should stay in the collection — use add_books_to_collection and remove_books_from_collection to change membership.
+Renames a collection, changes its description or reorders its books. library_item_ids ONLY REORDERS. It cannot add or remove anything: Audiobookshelf sorts the books the collection already has by their position in this list, so an id that is not currently in the collection is ignored, and a book you leave out is not removed — it moves to the FRONT. Pass every current book, in the order you want. Use add_books_to_collection and remove_books_from_collection to change membership. Reordering asks a person first, because the order somebody arranged cannot be reconstructed afterwards; renaming and re-describing do not. Where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `collection_id` | string | yes | Collection id, as returned by list_collections |
 | `name` | string | no | New name |
 | `description` | string | no | New description |
-| `library_item_ids` | string[] | no | Complete, newly ordered list of the books in the collection |
+| `library_item_ids` | string[] | no | The books the collection already has, in the order you want them. Reorders only — it adds nothing and removes nothing. |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
 ### `add_books_to_collection`
 
@@ -444,22 +465,23 @@ Adds one or more books to an existing collection. Books already in the collectio
 | `collection_id` | string | yes | Collection id, as returned by list_collections |
 | `library_item_ids` | string[] | yes | Library item ids of books |
 
-### `remove_books_from_collection`
+### `remove_books_from_collection` 👤
 
 **Remove books from collection** — write, destructive
 
-Removes books from a collection. The books themselves are untouched — only their membership in the collection ends, and it can be restored with add_books_to_collection.
+Removes books from a collection. The books themselves are untouched — only their membership in the collection ends, and it can be restored with add_books_to_collection. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `collection_id` | string | yes | Collection id, as returned by list_collections |
 | `library_item_ids` | string[] | yes | Library item ids of books |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
-### `delete_collection`
+### `delete_collection` 👤
 
 **Delete collection** — write, destructive
 
-Deletes a collection. The books stay in the library, but the curated list and its order are gone. Two-step: the first call returns a confirmation token, the second call with that token performs the deletion. Requires an Audiobookshelf account with delete permission.
+Deletes a collection. The books stay in the library, but the curated list and its order are gone. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it. Requires an Audiobookshelf account with delete permission.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -479,18 +501,19 @@ Creates a playlist for the API key’s user. Unlike a collection it may start ou
 | `description` | string | no | Optional description |
 | `items` | object[] | no | Initial entries, optional |
 
-### `update_playlist`
+### `update_playlist` 👤
 
-**Update playlist** — write
+**Update playlist** — write, destructive
 
-Renames a playlist, changes its description or reorders its entries. items replaces the order completely, so it has to contain every entry that should stay — use add_items_to_playlist and remove_items_from_playlist to change membership. The library of a playlist cannot be changed.
+Renames a playlist, changes its description or reorders its entries. items ONLY REORDERS. It cannot add or remove anything, and it must contain EXACTLY the entries the playlist already has: Audiobookshelf refuses a list of a different length with HTTP 400 "Invalid playlist items. Length mismatch". Read the current entries with get_playlist first, then send them in the order you want. Use add_items_to_playlist and remove_items_from_playlist to change membership. The library of a playlist cannot be changed. Reordering asks a person first, because the order somebody arranged cannot be reconstructed afterwards; renaming and re-describing do not. Where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `playlist_id` | string | yes | Playlist id, as returned by list_playlists |
 | `name` | string | no | New name |
 | `description` | string | no | New description |
-| `items` | object[] | no | Complete, newly ordered list of entries |
+| `items` | object[] | no | Exactly the entries the playlist already has, in the order you want them. Reorders only; a list of a different length is refused with HTTP 400. |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
 ### `add_items_to_playlist`
 
@@ -503,22 +526,23 @@ Appends books or podcast episodes to a playlist. All entries must come from the 
 | `playlist_id` | string | yes | Playlist id, as returned by list_playlists |
 | `items` | object[] | yes |  |
 
-### `remove_items_from_playlist`
+### `remove_items_from_playlist` 👤
 
 **Remove items from playlist** — write, destructive
 
-Removes entries from a playlist. The media itself is untouched and the entries can be added back with add_items_to_playlist. Note that Audiobookshelf deletes a playlist automatically once its last entry is removed.
+Removes entries from a playlist. The media itself is untouched and the entries can be added back with add_items_to_playlist. Note that Audiobookshelf deletes a playlist automatically once its last entry is removed. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `playlist_id` | string | yes | Playlist id, as returned by list_playlists |
 | `items` | object[] | yes |  |
+| `confirm_token` | string | no | Token from the first call of this tool |
 
-### `delete_playlist`
+### `delete_playlist` 👤
 
 **Delete playlist** — write, destructive
 
-Deletes a playlist. The media stays in the library. Two-step: the first call returns a confirmation token, the second call with that token performs the deletion.
+Deletes a playlist. The media stays in the library. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

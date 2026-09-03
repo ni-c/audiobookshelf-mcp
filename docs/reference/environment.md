@@ -49,16 +49,41 @@ makes. A warning is printed to stderr while it is active.
 
 Prefer adding your CA to the system trust store.
 
+## `ELICITATION`
+
+**Optional**, default `true`. Whether a client that *can* show a dialog is asked
+before a guarded tool acts. `false` takes the two-call-token path instead — it
+does not remove the guard, and a server started with it off prints one line
+saying so.
+
+Two ways it differs from every other variable on this page:
+
+- **No prefix.** One `export ELICITATION=false` reaches every MCP server in the
+  same environment, not just this one. That is the point of it and also its risk;
+  see [Asking a person](/guide/approval).
+- **Fatal on anything else.** `1`, `off` or a typo stop the server with exit code
+  1 rather than falling back to the default. It is the only variable of this
+  family that defaults to *on*, and a typo that fell back would leave the dialog
+  running while you believed it was off.
+
+Values are trimmed and matched case-insensitively, so `False` and ` false ` both
+work — the strictness is about which words count, not about their shape. It is
+read *after* the API key is deleted from `process.env`, so the fatal path cannot
+leave the key sitting there for a crash reporter.
+
 ## Not configurable
 
 | Behaviour         | Value          |
 | ----------------- | -------------- |
 | Request timeout   | 15 s           |
 | HTTP redirects    | never followed |
-| List cap          | 100 entries    |
+| Response ceiling  | 5 MB           |
+| Result ceiling    | 100 000 bytes  |
+| Item-page cap     | 100 entries    |
+| Embedded members  | first 25       |
 | Description cap   | 800 characters |
 | Error body cap    | 2000 chars     |
-| Confirm-token TTL | 5 minutes      |
+| Fallback token TTL | 5 minutes     |
 | Pending tokens    | max 100        |
 
 ## Narrowing the tool list

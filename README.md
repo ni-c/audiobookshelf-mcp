@@ -7,6 +7,7 @@
 [![license](https://img.shields.io/npm/l/audiobookshelf-mcp)](LICENSE)
 [![container](https://img.shields.io/badge/ghcr.io-ni--c%2Faudiobookshelf--mcp-blue)](https://github.com/ni-c/audiobookshelf-mcp/pkgs/container/audiobookshelf-mcp)
 [![docs](https://img.shields.io/badge/docs-audiobookshelf--mcp.ni--c.de-informational)](https://audiobookshelf-mcp.ni-c.de)
+[![HTTP • via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-6f42c1)](https://mcp-hub.ni-c.de)
 [![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for
@@ -35,6 +36,21 @@ reliably from eight than from forty-four — see
 
 <img src="https://audiobookshelf-mcp.ni-c.de/demo.gif" alt="Terminal recording: the server reports 44 tools, lists library items as a compact projection, and answers the first delete_collection call with a single-use confirmation token instead of deleting anything" width="800">
 
+## What makes it different
+
+**Every response is a projection, not the raw object.** An expanded library item
+carries every audio file, track and chapter with full ffprobe metadata. The media
+tools answer with a compact shape instead, and `detail="full"` is there for when
+the raw object really is what you want.
+
+**Twenty-nine of the forty-four tools only read.** `AUDIOBOOKSHELF_READ_ONLY=true`
+registers those and nothing else, so a write tool is absent from `tools/list`
+rather than refused when it is called.
+
+**The six tools that take something out ask a person first**, through MCP
+elicitation — a dialog the model cannot answer on its behalf, falling back to a
+single-use token bound to the exact targets where the client cannot show one.
+
 ## Requirements
 
 - Node.js 22 or newer
@@ -59,6 +75,7 @@ once, at creation.
 | `AUDIOBOOKSHELF_INSECURE_TLS` | no       | `true` accepts self-signed certificates — scoped to this connection, not process-wide   |
 | `AUDIOBOOKSHELF_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset      |
 | `AUDIOBOOKSHELF_DENY_TOOLS`   | no       | Same syntax; removed from whatever `AUDIOBOOKSHELF_ALLOW_TOOLS` left                    |
+| `ELICITATION`                 | no       | `false` replaces the approval dialog with the two-call token. **Not prefixed**          |
 
 The server starts without configuration: it completes the MCP handshake and lists
 its tools, and every call then fails with the setup instructions. That is
@@ -86,7 +103,9 @@ If you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de)
 is the other answer — its `/hub` endpoint replaces every server's tools with six
 meta-tools.
 
-## Install
+## Installation
+
+### Claude Code
 
 ```sh
 claude mcp add audiobookshelf \
@@ -95,7 +114,9 @@ claude mcp add audiobookshelf \
   -- npx -y audiobookshelf-mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+### Claude Desktop
+
+`claude_desktop_config.json`:
 
 ```json
 {
@@ -112,7 +133,9 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-Codex (`~/.codex/config.toml`):
+### Codex
+
+`~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.audiobookshelf]
@@ -121,7 +144,9 @@ args = ["-y", "audiobookshelf-mcp"]
 env = { AUDIOBOOKSHELF_URL = "https://abs.example.com", AUDIOBOOKSHELF_API_KEY = "…" }
 ```
 
-Container (multi-arch, with SBOM and build provenance):
+### Docker
+
+Multi-arch, with SBOM and build provenance:
 
 ```sh
 docker run -i --rm \
@@ -135,7 +160,58 @@ publish. More client recipes, including how to keep the key off the `docker run`
 command line, are in the
 [client guide](https://audiobookshelf-mcp.ni-c.de/guide/clients).
 
+### Through mcp-hub
+
+A client that cannot spawn a local process — ChatGPT connectors, Claude on the web,
+Cursor, LibreChat — reaches audiobookshelf-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one
+container serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login
+behind a single password and long-lived tokens for the clients that cannot do OAuth. Its
+`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of
+them without N×tool schemas in the model's context, and it speaks both protocol revisions
+— a question this server asks travels through it to the person at the far end.
+
+Its `/config/mcp.json` uses Claude Code's format, so the entry is the one you already
+have:
+
+```json
+{
+  "mcpServers": {
+    "audiobookshelf": {
+      "command": "npx",
+      "args": ["-y", "audiobookshelf-mcp"],
+      "env": { "AUDIOBOOKSHELF_ALLOW_TOOLS": "essential" },
+      "denyTools": ["delete_*"]
+    }
+  }
+}
+```
+
+`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not
+the same thing as `*_ALLOW_TOOLS` in `env` — the difference, and the mistake it invites,
+are in the [client guide](https://audiobookshelf-mcp.ni-c.de/guide/clients#through-mcp-hub).
+
 ## Tools
+
+Every tool declares an `outputSchema` and answers with `structuredContent`
+alongside the text block, so a client can use the result without parsing prose.
+Seven tools that answered with a sentence — _"Collection col_1 deleted."_ — now
+answer with the fields as well.
+
+The tools that report library metadata carry `untrusted: true` and
+`source: "audiobookshelf"` as fields: book descriptions pulled from metadata
+providers, podcast feed summaries and episode titles are all written by someone
+else. The rest are without it — an id this server was given, the account it
+authenticates as, counters the instance keeps about itself.
+
+The documents are described as open objects with the top-level keys this server
+builds. `detail: "full"` hands the API record back whole, so the same tool
+answers with far more keys than it names — and the SDK validates each result
+against its schema before it goes out, which is exactly why a strict shape would
+be wrong here.
+
+`get_personalized_shelves` answers `{items: [...]}` rather than the bare array
+the API sends: a schema whose root is an array is served to a 2025-era client
+rewritten as `{result: …}`, so it would otherwise answer in two shapes.
 
 ### Reading
 
@@ -168,23 +244,45 @@ command line, are in the
 
 ### Writing
 
-| Tool                                                            | What it does                                                            |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `set_media_progress`                                            | Set position, mark finished or unfinished, hide from Continue Listening |
-| `delete_media_progress`                                         | Delete a progress record — needs a confirmation token                   |
-| `create_bookmark` / `update_bookmark` / `delete_bookmark`       | Named positions in a book                                               |
-| `create_collection` / `update_collection` / `delete_collection` | Collections; delete needs a confirmation token                          |
-| `add_books_to_collection` / `remove_books_from_collection`      | Collection membership                                                   |
-| `create_playlist` / `update_playlist` / `delete_playlist`       | Playlists; delete needs a confirmation token                            |
-| `add_items_to_playlist` / `remove_items_from_playlist`          | Playlist membership                                                     |
+| Tool                                                               | What it does                                                            |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `set_media_progress`                                               | Set position, mark finished or unfinished, hide from Continue Listening |
+| `delete_media_progress` 👤                                         | Delete a progress record — the listening history of that item           |
+| `create_bookmark` / `update_bookmark` / `delete_bookmark` 👤       | Named positions in a book                                               |
+| `create_collection` / `update_collection` / `delete_collection` 👤 | Collections                                                             |
+| `add_books_to_collection` / `remove_books_from_collection` 👤      | Collection membership                                                   |
+| `create_playlist` / `update_playlist` / `delete_playlist` 👤       | Playlists                                                               |
+| `add_items_to_playlist` / `remove_items_from_playlist` 👤          | Playlist membership                                                     |
+
+👤 asks a person through MCP elicitation · falls back to a two-call
+`confirm_token` where the client cannot show a dialog.
 
 ### Response size
 
 Audiobookshelf returns very large objects — an expanded library item carries every
 audio file, track and chapter with full ffprobe metadata. Every tool that returns
 media therefore answers with a compact projection by default and accepts
-`detail: "full"` for the raw object. List tools are capped at 100 entries per call
-and say how to page on when more match.
+`detail: "full"` for the raw object.
+
+Three bounds, because one is not enough:
+
+- **A response ceiling of 5 MB.** `content-length` is checked before a byte is
+  read and a chunked body is counted while reading, so an oversized answer is
+  refused rather than parsed.
+- **A result ceiling of 100 000 bytes**, applied in `jsonResult` — so it covers
+  `detail: "full"` too. Whole entries are dropped, never characters: a truncated
+  document is not a smaller answer, it is an unparseable one. The result then
+  carries a `truncated` block naming what to call instead.
+- **A cap on embedded members.** A compact collection or playlist embeds the
+  first 25 of its books or entries and reports the real count; `get_collection`
+  and `get_playlist` return the whole membership for one of them.
+
+`list_library_items` pages properly, with `limit` and `page`. Seven listing tools
+have neither — `list_libraries`, `list_authors`, `list_tags`, `list_genres`,
+`list_collections`, `list_playlists` and `list_bookmarks` — because the
+Audiobookshelf routes behind them return everything in one answer and take no
+paging parameters. `library_id` narrows the two collection routes; the rest are
+bounded by the ceilings above.
 
 ### Filtering
 
@@ -199,20 +297,44 @@ filter_group="progress", filter_value="finished" | "in-progress" | "not-started"
 filter_group="issues"    (standalone, no value)
 ```
 
+## Not exposed, on purpose
+
+**No playback.** Pausing, seeking and playing are a session state machine that
+belongs in a real client. `set_media_progress` covers "mark this finished" and
+"jump me to chapter 12"; your phone does the playing.
+
+**No administration, even with an admin key.** There is no tool for user
+management, server settings, backups, cache purging, filesystem browsing, library
+or item deletion, metadata rewriting or file uploads. Those endpoints exist in
+Audiobookshelf; they are simply not wired up here, because the blast radius of a
+confused or manipulated model is bounded by the tool list.
+
 ## Safety
 
 - **Read-only mode.** `AUDIOBOOKSHELF_READ_ONLY=true` does not register the write
   tools at all, rather than refusing them at call time.
-- **Confirmation tokens.** `delete_collection`, `delete_playlist` and
-  `delete_media_progress` answer the first call with a single-use token that is
-  bound to the target id and expires after five minutes; only a second call
-  carrying that token performs the deletion. A plain `confirm: true` flag could be
-  set by the model on the first try, or be talked into it by text coming out of
-  the library. Operations that are cheap to undo — removing an item from a
-  collection, deleting a bookmark — are marked destructive but do not require a
-  token.
+- **A person is asked, not just told.** The eight tools that can take something
+  out — the three deletes, `delete_bookmark`, `remove_books_from_collection`,
+  `remove_items_from_playlist`, and `update_collection` / `update_playlist` when
+  they are asked to reorder, which replaces an order nobody can reconstruct —
+  raise a real dialog through MCP elicitation,
+  which the model cannot answer on its behalf. A plain `confirm: true` flag could
+  be set by the model on the first try, or be talked into it by text coming out
+  of the library.
+
+  Where the client cannot show a dialog they fall back to a single-use token
+  bound to the exact targets and expiring after five minutes. That fallback
+  proves the call was made twice with the same arguments and nothing more, and
+  the text says so rather than implying somebody approved. `ELICITATION=false`
+  takes it deliberately; it never removes the guard. See
+  [Asking a person](https://audiobookshelf-mcp.ni-c.de/guide/approval).
+
 - **Confirmation prompts never quote API content.** Collection and playlist names
-  are user-supplied text and are read by a model, so the prompts name only ids.
+  are user-supplied text and are read by a model, so the prompts name ids and
+  counts only.
+- **A 200 that is not JSON is an error.** Returning the body as a string made an
+  SSO portal or a captive proxy in front of the instance look like an empty
+  library rather than like a failure.
 - **Untrusted content is marked.** Book descriptions come from metadata providers
   and podcast summaries come from RSS feeds — third parties write them. Every
   result carrying such content is labelled as data, not instructions.
@@ -234,11 +356,16 @@ One caveat that comes from Audiobookshelf itself: removing the _last_ entry from
 playlist deletes the playlist. `remove_items_from_playlist` says so in its result
 when it happens.
 
+## Documentation
+
+The full guide, tool reference and security notes live at
+**[audiobookshelf-mcp.ni-c.de](https://audiobookshelf-mcp.ni-c.de)** (source in [`docs/`](docs/)).
+
 ## Development
 
 ```sh
 npm install
-npm run lint          # eslint + prettier --check
+npm run lint          # oxlint + prettier --check
 npm run build         # tsc
 npm test              # vitest
 npm run test:coverage # with thresholds
@@ -289,4 +416,4 @@ rather than a public issue; the policy is in [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+[MIT](LICENSE) © Willi Thiel

@@ -1,9 +1,6 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
-import { jsonResult, run, untrustedJsonResult } from '../result.js';
+import { marked, plain, record } from '../output-schema.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   detailParam,
   libraryItemIdParam,
@@ -19,6 +16,10 @@ import {
   compactUser,
   listFrom,
 } from '../shape.js';
+
+import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
+import { jsonResult, run, untrustedJsonResult } from '../result.js';
 
 const EPISODE_ID_DESCRIPTION =
   'Podcast episode id — required for podcast episodes, omitted for books';
@@ -36,10 +37,11 @@ export function registerMeReadTools(
         'their permissions and accessible libraries. The compact projection ' +
         'reports media progress and bookmarks as counts — the full user object ' +
         'embeds every single one of them.',
-      inputSchema: {
+      inputSchema: z.object({
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ detail }) =>
       run(async () => {
@@ -57,11 +59,15 @@ export function registerMeReadTools(
         '"Continue Listening" list across all libraries. The entries carry ' +
         'progressLastUpdate but not the position itself; use get_media_progress ' +
         'for that. For podcasts, recentEpisode names the episode in progress.',
-      inputSchema: {
+      inputSchema: z.object({
         limit: limitParam(25),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked({
+        numReturned: z.number().int(),
+        libraryItems: z.array(record),
+      }),
     },
     async ({ limit, detail }) =>
       run(async () => {
@@ -85,7 +91,7 @@ export function registerMeReadTools(
         'The listening progress of the current user for one book or podcast ' +
         'episode: position, percentage and whether it is finished. Returns a 404 ' +
         'error when the item has never been started.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         episode_id: z
           .string()
@@ -93,8 +99,9 @@ export function registerMeReadTools(
           .optional()
           .describe(EPISODE_ID_DESCRIPTION),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: plain(),
     },
     async ({ library_item_id, episode_id, detail }) =>
       run(async () => {
@@ -120,10 +127,11 @@ export function registerMeReadTools(
         'most recent sessions. detail="full" returns the complete per-day history ' +
         'and the full metadata of every item ever listened to, which is the ' +
         'largest response this API produces.',
-      inputSchema: {
+      inputSchema: z.object({
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ detail }) =>
       run(async () => {
@@ -141,15 +149,16 @@ export function registerMeReadTools(
       description:
         'The "year in review" statistics of the current user for one calendar ' +
         'year: books finished, time listened, top authors and genres.',
-      inputSchema: {
+      inputSchema: z.object({
         year: z
           .number()
           .int()
           .min(2000)
           .max(2100)
           .describe('Calendar year, e.g. 2026'),
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked(),
     },
     async ({ year }) =>
       run(async () =>
@@ -164,12 +173,13 @@ export function registerMeReadTools(
       description:
         'The playback sessions of the current user, newest first — each entry is ' +
         'one listening stretch with device, position and time listened.',
-      inputSchema: {
+      inputSchema: z.object({
         page: pageParam,
         limit: limitParam(10),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked({ sessions: z.array(record) }),
     },
     async ({ page, limit, detail }) =>
       run(async () => {
@@ -196,8 +206,11 @@ export function registerMeReadTools(
       title: 'List bookmarks',
       description:
         'The bookmarks of the current user — either all of them, or those of one ' +
-        'library item. A bookmark is a named position in seconds.',
-      inputSchema: {
+        'library item. A bookmark is a named position in seconds.\n\n' +
+        'Audiobookshelf has no bookmarks endpoint: they are a field on the ' +
+        'account, so this reads /api/me and filters here. That is why there is ' +
+        'no pagination — you get all of them.',
+      inputSchema: z.object({
         library_item_id: z
           .string()
           .min(1)
@@ -206,17 +219,25 @@ export function registerMeReadTools(
             'Restrict the result to the bookmarks of this library item'
           ),
         detail: detailParam,
-      },
-      annotations: { readOnlyHint: true },
+      }),
+      annotations: READ_ONLY,
+      outputSchema: marked({ bookmarks: z.array(record) }),
     },
     async ({ library_item_id, detail }) =>
       run(async () => {
-        const path =
+        // `/api/me/bookmarks` does not exist — verified against 2.29.0, it is
+        // a 404 whether or not an item id follows it. Bookmarks are a field on
+        // the account object, so the filtering happens here.
+        const data = await api.get('/api/me');
+        const all = listFrom(data, 'bookmarks');
+        const bookmarks =
           library_item_id === undefined
-            ? '/api/me/bookmarks'
-            : `/api/me/bookmarks/${assertPathSegment(library_item_id, 'library_item_id')}`;
-        const data = await api.get(path);
-        const bookmarks = listFrom(data, 'bookmarks');
+            ? all
+            : all.filter(
+                (bookmark) =>
+                  (bookmark as { libraryItemId?: unknown }).libraryItemId ===
+                  library_item_id
+              );
         return untrustedJsonResult({
           numBookmarks: bookmarks.length,
           bookmarks:

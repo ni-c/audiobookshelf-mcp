@@ -1,14 +1,16 @@
 import { z } from 'zod';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { marked, plain, record } from '../output-schema.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { setResourceKey } from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import {
-  confirmationPrompt,
-  setResourceKey,
-  type ConfirmationStore,
-} from '../confirm.js';
-import { errorResult, run, textResult } from '../result.js';
+  errorResult,
+  jsonResult,
+  run,
+  untrustedJsonResult,
+} from '../result.js';
 import { confirmTokenParam, libraryItemIdParam } from '../schema.js';
 
 const episodeIdParam = z
@@ -22,7 +24,8 @@ const episodeIdParam = z
 export function registerProgressWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
-  confirmations: ConfirmationStore
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'set_media_progress',
@@ -34,7 +37,7 @@ export function registerProgressWriteTools(
         'is_finished=false to reopen it (which resets the position to 0), or ' +
         'current_time to jump to a position in seconds. Audiobookshelf also marks ' +
         'an item finished on its own once less than ten seconds remain.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         episode_id: episodeIdParam,
         current_time: z
@@ -62,7 +65,17 @@ export function registerProgressWriteTools(
             'Hide the item from the "Continue Listening" shelf without changing ' +
               'its position'
           ),
+      }),
+      annotations: {
+        // A listening position is a marker, not authored content, and moving
+        // it is what this tool is for. delete_media_progress is the one that
+        // loses the history.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
+      outputSchema: marked({ updated: z.literal(true), progress: record }),
     },
     async ({
       library_item_id,
@@ -98,21 +111,26 @@ export function registerProgressWriteTools(
         // Only the fields below are forwarded. The endpoint applies its payload
         // to the progress record wholesale, so passing arbitrary keys through
         // would let a caller write columns this tool never intended to touch.
-        await api.patch(path, {
-          ...(current_time !== undefined ? { currentTime: current_time } : {}),
-          ...(progress !== undefined ? { progress } : {}),
-          ...(is_finished !== undefined ? { isFinished: is_finished } : {}),
-          ...(hide_from_continue_listening !== undefined
-            ? { hideFromContinueListening: hide_from_continue_listening }
-            : {}),
-        });
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.patch(
+          path,
+          {
+            ...(current_time !== undefined
+              ? { currentTime: current_time }
+              : {}),
+            ...(progress !== undefined ? { progress } : {}),
+            ...(is_finished !== undefined ? { isFinished: is_finished } : {}),
+            ...(hide_from_continue_listening !== undefined
+              ? { hideFromContinueListening: hide_from_continue_listening }
+              : {}),
+          },
+          { text: true }
+        );
 
         // The endpoint answers with 200 and no body; read the result back so the
         // model sees the state that actually got stored.
         const updated = await api.get(path);
-        return textResult(
-          `Progress updated.\n${JSON.stringify(updated, null, 2)}`
-        );
+        return untrustedJsonResult({ updated: true, progress: updated });
       })
   );
 
@@ -124,9 +142,9 @@ export function registerProgressWriteTools(
         'Deletes a progress record of the API key’s user, which removes the ' +
         'listening history for that item — position, finished state and dates. ' +
         'Takes the media progress id (field "id" of get_media_progress), not the ' +
-        'library item id. Two-step: the first call returns a confirmation token, ' +
-        'the second call with that token performs the deletion.',
-      inputSchema: {
+        'library item id. Asks a person first; where the client cannot show a ' +
+        'dialog, call once to receive a token and again with it.',
+      inputSchema: z.object({
         media_progress_id: z
           .string()
           .min(1)
@@ -134,10 +152,17 @@ export function registerProgressWriteTools(
             'Media progress id, from the "id" field of get_media_progress'
           ),
         confirm_token: confirmTokenParam,
+      }),
+      annotations: {
+        // Idempotent: the listening history is gone either way.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      annotations: { destructiveHint: true },
+      outputSchema: plain({ deleted_progress_id: z.string() }),
     },
-    async ({ media_progress_id, confirm_token }) =>
+    async ({ media_progress_id, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(
           media_progress_id,
@@ -145,33 +170,45 @@ export function registerProgressWriteTools(
         );
         const resource = setResourceKey('delete_media_progress', [safeId]);
 
-        if (!confirmations.consume(resource, confirm_token)) {
-          if (confirm_token !== undefined) {
-            return errorResult(
-              'The confirmation token is invalid, expired or was issued for a ' +
-                'different progress record. Call delete_media_progress without a ' +
-                'token to get a new one.'
-            );
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete the listening history of media progress ${safeId}`,
+            consequence:
+              'The saved position and listening history for that item are lost.',
+            resourceKey: resource,
+            token: confirm_token,
+            toolName: 'delete_media_progress',
+            hint: 'Tick to go ahead, leave it to cancel.',
           }
-          const token = confirmations.issue(resource);
-          return textResult(
-            confirmationPrompt(
-              `delete the listening history of media progress ${safeId}`,
-              token,
-              confirmations.ttlMinutes
-            )
+        );
+        // A token that was sent and did not match is refused with the reason
+        // rather than answered with a fresh prompt; the sentence is the
+        // library's, so every server refuses in the same words.
+        if (outcome.decision === 'rejected') {
+          return errorResult(outcome.reason);
+        }
+        if (outcome.decision === 'declined') {
+          return errorResult(
+            `The user declined. delete_media_progress did nothing.`
           );
         }
+        if (outcome.decision === 'pending') return outcome.result;
 
-        await api.delete(`/api/me/progress/${safeId}`);
-        return textResult(`Media progress ${safeId} deleted.`);
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/me/progress/${safeId}`, { text: true });
+        return jsonResult({ deleted_progress_id: safeId });
       })
   );
 }
 
 export function registerBookmarkWriteTools(
   server: McpServer,
-  api: AudiobookshelfApi
+  api: AudiobookshelfApi,
+  confirmations: ConfirmationStore,
+  approval: Approver
 ): void {
   server.registerTool(
     'create_bookmark',
@@ -181,14 +218,22 @@ export function registerBookmarkWriteTools(
         'Creates a bookmark at a position of a book for the API key’s user. The ' +
         'position in seconds is the bookmark’s identity — a second bookmark at ' +
         'the same second is rejected.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds where the bookmark is placed'),
         title: z.string().min(1).max(255).describe('Bookmark title'),
+      }),
+      annotations: {
+        // Additive. Two calls leave two bookmarks.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
+      outputSchema: marked({ created: z.literal(true), bookmark: record }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -196,9 +241,7 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return textResult(
-          `Bookmark created.\n${JSON.stringify(created, null, 2)}`
-        );
+        return untrustedJsonResult({ created: true, bookmark: created });
       })
   );
 
@@ -209,14 +252,22 @@ export function registerBookmarkWriteTools(
       description:
         'Renames the bookmark at a given position. The position itself cannot be ' +
         'changed — delete the bookmark and create a new one for that.',
-      inputSchema: {
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
         title: z.string().min(1).max(255).describe('New bookmark title'),
+      }),
+      annotations: {
+        // Replaces a title somebody typed, with no history.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
+      outputSchema: marked({ updated: z.literal(true), bookmark: record }),
     },
     async ({ library_item_id, time, title }) =>
       run(async () => {
@@ -224,9 +275,7 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return textResult(
-          `Bookmark updated.\n${JSON.stringify(updated, null, 2)}`
-        );
+        return untrustedJsonResult({ updated: true, bookmark: updated });
       })
   );
 
@@ -235,18 +284,29 @@ export function registerBookmarkWriteTools(
     {
       title: 'Delete bookmark',
       description:
-        'Deletes the bookmark at a given position. No confirmation token: a ' +
-        'bookmark is a position and a title, and create_bookmark restores it.',
-      inputSchema: {
+        'Deletes the bookmark at a given position. Asks a person first; where ' +
+        'the client cannot show a dialog, call once to receive a token and ' +
+        'again with it.',
+      inputSchema: z.object({
         library_item_id: libraryItemIdParam,
         time: z
           .number()
           .min(0)
           .describe('Position in seconds identifying the bookmark'),
+        confirm_token: confirmTokenParam,
+      }),
+      annotations: {
+        // Idempotent by the specification's wording.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      annotations: { destructiveHint: true },
+      outputSchema: plain({
+        deleted_bookmark: z.object({ item_id: z.string(), time: z.number() }),
+      }),
     },
-    async ({ library_item_id, time }) =>
+    async ({ library_item_id, time, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(library_item_id, 'library_item_id');
         // The position goes into the path, so it must be a finite number and
@@ -254,10 +314,41 @@ export function registerBookmarkWriteTools(
         if (!Number.isFinite(time)) {
           throw new Error('invalid time: must be a finite number of seconds');
         }
-        await api.delete(`/api/me/item/${safeId}/bookmark/${time}`);
-        return textResult(
-          `Bookmark at ${time} seconds of item ${safeId} deleted.`
+        // The description used to say this needed no confirmation because
+        // "create_bookmark restores it". It restores a bookmark at that
+        // position; the title somebody typed is gone, and the position is the
+        // only thing the delete call knows — a wrong `time` takes out a
+        // different bookmark than the one that was meant.
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `delete the bookmark at ${time} seconds of item ${safeId}`,
+            consequence:
+              'The title that was typed for it is not recoverable. ' +
+              'create_bookmark makes a new one at that position, with a new ' +
+              'title.',
+            resourceKey: setResourceKey('delete_bookmark', [
+              safeId,
+              String(time),
+            ]),
+            token: confirm_token,
+            toolName: 'delete_bookmark',
+            hint: 'Tick to go ahead, leave it to cancel.',
+          }
         );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult('The user declined. delete_bookmark did nothing.');
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
+        // Answers `200 text/plain "OK"`, not a document.
+        await api.delete(`/api/me/item/${safeId}/bookmark/${time}`, {
+          text: true,
+        });
+        return jsonResult({ deleted_bookmark: { item_id: safeId, time } });
       })
   );
 }
