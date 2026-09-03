@@ -10,6 +10,13 @@ import { z } from 'zod';
  * the projections off entirely, and an output schema is validated before the
  * answer goes out. A strict shape would turn a field a release adds into a tool
  * that fails outright.
+ *
+ * Every open object here carries `.meta({ additionalProperties: true })`. Left
+ * to itself zod writes "accepts anything" as `"additionalProperties": {}` — an
+ * empty schema, legal and meaning exactly the same as `true`, but the spelling
+ * some MCP clients refuse or mishandle. `meta` is merged into the emitted JSON
+ * Schema and nothing else, so the wire says `true` while the runtime stays as
+ * permissive as it has to be.
  */
 
 /** The marker every result built from Audiobookshelf content carries. */
@@ -42,12 +49,14 @@ export const record = z.looseObject({}).meta({ additionalProperties: true });
 export function marked(shape: z.ZodRawShape = {}) {
   return z
     .object({ ...untrustedFields, truncated: truncationNote, ...shape })
-    .catchall(z.unknown());
+    .catchall(z.unknown())
+    .meta({ additionalProperties: true });
 }
 
 /** The same, without the marker: this server's own words about its own work. */
 export function plain(shape: z.ZodRawShape = {}) {
   return z
     .object({ truncated: truncationNote, ...shape })
-    .catchall(z.unknown());
+    .catchall(z.unknown())
+    .meta({ additionalProperties: true });
 }

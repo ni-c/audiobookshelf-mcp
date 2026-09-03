@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The advertised schemas avoid a spelling that is legal JSON Schema and still
+  gets a tool refused, or its constraint silently dropped, by some MCP clients:
+  an open object now writes `"additionalProperties": true` rather than the
+  empty schema `{}` zod emits for it. What the tools accept and return is
+  unchanged; only the way the schema says so is.
+
 - `get_personalized_shelves` answers `{items: [...]}` instead of the bare array
   the API sends. A schema whose root is an array is served to a 2025-era client
   rewritten as `{result: …}`, so the tool would otherwise answer in two shapes
