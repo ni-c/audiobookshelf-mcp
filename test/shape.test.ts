@@ -159,13 +159,13 @@ describe('compactUser', () => {
   it('replaces the embedded progress and bookmark lists with counts', () => {
     const shaped = compactUser({
       id: 'usr_1',
-      username: 'willi',
+      username: 'you',
       type: 'admin',
       mediaProgress: [{ id: 'a' }, { id: 'b' }],
       bookmarks: [{ time: 1 }],
     });
     expect(shaped).toMatchObject({
-      username: 'willi',
+      username: 'you',
       numMediaProgresses: 2,
       numBookmarks: 1,
     });
