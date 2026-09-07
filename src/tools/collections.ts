@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { setResourceKey } from 'mcp-approval';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
@@ -243,13 +243,14 @@ export function registerCollectionWriteTools(
                 'reconstructed from here. Nothing leaves the collection: this ' +
                 'sorts the books it already has, and a book left out of the ' +
                 'list moves to the front rather than being removed.',
-              // Each target carries its position. `setResourceKey` sorts its
-              // list before fingerprinting, so an unprefixed list would give
-              // [A, B] and [B, A] the same key — and the order *is* part of
-              // what this tool changes.
-              resourceKey: setResourceKey('update_collection:books', [
+              // The order *is* part of what this tool changes, so the key must
+              // tell [A, B] from [B, A]. `setResourceKey` sorts its list before
+              // fingerprinting and would give both the same key;
+              // `orderedResourceKey` binds every part to its position itself,
+              // which this site used to do by hand with an index prefix.
+              resourceKey: orderedResourceKey('update_collection:books', [
                 `collection:${safeCollection}`,
-                ...books.map((id, index) => `${index}:${id}`),
+                ...books,
               ]),
               token: confirm_token,
               toolName: 'update_collection',

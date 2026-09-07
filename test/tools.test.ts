@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 
 import type { Config } from '../src/config.js';
 import { createServer } from '../src/server.js';
@@ -348,6 +349,21 @@ describe('write tools', () => {
     }
   );
 
+  it('keys a tuple by position, where a set would not', () => {
+    // `setResourceKey` sorts its parts, so [A, B] and [B, A] share a key;
+    // `orderedResourceKey` binds each part to its index. The three tools
+    // below key a tuple and rely on the second.
+    expect(setResourceKey('op', ['a', 'b'])).toBe(
+      setResourceKey('op', ['b', 'a'])
+    );
+    expect(orderedResourceKey('op', ['a', 'b'])).not.toBe(
+      orderedResourceKey('op', ['b', 'a'])
+    );
+    expect(orderedResourceKey('op', ['a', 'b'])).toBe(
+      orderedResourceKey('op', ['a', 'b'])
+    );
+  });
+
   it.each([
     [
       'update_collection',
@@ -365,13 +381,20 @@ describe('write tools', () => {
         items: [{ library_item_id: 'li_2' }, { library_item_id: 'li_1' }],
       },
     ],
+    [
+      // The pair (item, seconds), swapped: a set key would sort both to
+      // ["120", "90"] and hand the second call the first call's token.
+      'delete_bookmark',
+      { library_item_id: '90', time: 120 },
+      { library_item_id: '120', time: 90 },
+    ],
   ] as [string, Record<string, unknown>, Record<string, unknown>][])(
     '%s binds its token to the order, not just to the set',
     async (name, args, reordered) => {
       // `setResourceKey` sorts its target list before fingerprinting, so a
-      // bare list of ids would give [A, B] and [B, A] the same key — and the
-      // order is precisely what this half of the tool changes. Each target
-      // carries its position.
+      // bare list would give [A, B] and [B, A] the same key — and for the
+      // reorders the order is precisely what the tool changes. The key comes
+      // from `orderedResourceKey`, which binds each part to its position.
       const spy = mockFetch();
       const client = await connect();
 

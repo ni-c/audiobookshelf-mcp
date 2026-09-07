@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { setResourceKey } from 'mcp-approval';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 import {
   errorResult,
@@ -245,15 +245,16 @@ export function registerPlaylistWriteTools(
                 'reconstructed from here. Nothing leaves the playlist: ' +
                 'Audiobookshelf refuses a list that is not exactly the current ' +
                 'entries.',
-              // Each target carries its position. `setResourceKey` sorts its
-              // list before fingerprinting, so an unprefixed list would give
-              // [A, B] and [B, A] the same key — and the order *is* the change
-              // this tool makes.
-              resourceKey: setResourceKey('update_playlist:items', [
+              // The order *is* the change this tool makes, so the key must
+              // tell [A, B] from [B, A]. `setResourceKey` sorts its list before
+              // fingerprinting and would give both the same key;
+              // `orderedResourceKey` binds every part to its position itself,
+              // which this site used to do by hand with an index prefix.
+              resourceKey: orderedResourceKey('update_playlist:items', [
                 `playlist:${safePlaylist}`,
                 ...entries.map(
-                  (entry, index) =>
-                    `${index}:${String(entry.libraryItemId)}/${String(entry.episodeId ?? '')}`
+                  (entry) =>
+                    `${String(entry.libraryItemId)}/${String(entry.episodeId ?? '')}`
                 ),
               ]),
               token: confirm_token,

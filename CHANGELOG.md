@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.4.0] - 2026-09-07
 
 ### Changed
 
@@ -50,7 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file nobody could open. `dist/**/*.js` is unchanged; the package is about a
   fifth smaller.
 
-[Unreleased]: https://github.com/ni-c/audiobookshelf-mcp/compare/v0.3.0...HEAD
+### Security
+
+- **mcp-approval 0.8.2.** A sealed dialog answer is single-use since 0.8.1: the same `requestState` presented again within its lifetime used to be accepted again, and with a resource key that is the same every time — a whole stream, a fixed set of targets — every replay landed. npm users on `^0.8.0` already had the fix; the Docker image is built from the lockfile and carried 0.8.0 until this release.
+- **Approval keys bound to positions.** `update_playlist` (items) and `update_collection` (books) reorder a list, and the order is the whole change, so each entry was prefixed with its index by hand before `setResourceKey` sorted the list. `delete_bookmark` keyed the pair (item, seconds) as a plain set, so a token for one pairing also matched the swapped one. All three now build their key with `orderedResourceKey` from mcp-approval 0.8.2, which binds every part to its position itself; the hand-written prefixes are gone. Keys over sets of ids — the removals, the deletions — stay on `setResourceKey`, where sorting is the point.
 
 ## [0.3.0] - 2026-09-03
 

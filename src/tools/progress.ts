@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { setResourceKey } from 'mcp-approval';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
@@ -329,7 +329,10 @@ export function registerBookmarkWriteTools(
               'The title that was typed for it is not recoverable. ' +
               'create_bookmark makes a new one at that position, with a new ' +
               'title.',
-            resourceKey: setResourceKey('delete_bookmark', [
+            // (item, seconds) is a pair, not a set: `setResourceKey` sorts
+            // its parts, so a token for item "90" at 120 s would also have
+            // confirmed item "120" at 90 s.
+            resourceKey: orderedResourceKey('delete_bookmark', [
               safeId,
               String(time),
             ]),
