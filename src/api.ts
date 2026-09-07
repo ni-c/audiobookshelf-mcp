@@ -9,8 +9,18 @@ import {
   missingConfigMessage,
   type Config,
 } from './config.js';
+import { assertHeaderValue, quoted } from './clean.js';
 
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Ceiling on an error body.
+ *
+ * Its own number, far below the success ceiling: a 401 from a reverse proxy is
+ * a login page, and reading five megabytes of it to quote two thousand
+ * characters is work an unauthenticated answer should not be able to buy.
+ */
+const MAX_ERROR_BYTES = 64 * 1024;
 
 /**
  * Ceiling on a single upstream response.
@@ -181,6 +191,19 @@ export class AudiobookshelfApi {
       init.body = JSON.stringify(body);
     }
 
+    // Before `fetch` sees them, and after the body branch has added its own.
+    // undici refuses a header value carrying a control character with
+    // `Headers.append: "<value>" is an invalid header value.` — the whole
+    // value, quoted — and this server's Authorization value *is* the API key.
+    // That TypeError reaches `run`, which answers with its message, so the key
+    // would land in the model's context because of a line break in a pasted
+    // credential. `loadConfig` refuses that shape at startup; this is the
+    // second half, because a Config can be built without it and the tests do
+    // exactly that.
+    for (const [name, value] of Object.entries(headers)) {
+      assertHeaderValue(name, value);
+    }
+
     const url = `${this.baseUrl}${path}`;
     // The insecure dispatcher requires undici's own fetch; the default path uses
     // the (stubbable) global fetch so tests can intercept it.
@@ -191,14 +214,15 @@ export class AudiobookshelfApi {
         } as UndiciRequestInit)
       : await fetch(url, init);
 
-    // An error body is only ever quoted back after `sanitizeErrorBody` cuts it
-    // to 2 000 characters, so truncating it costs nothing and keeps the status
-    // code — which is the diagnostic — instead of replacing it with a size
-    // complaint. A successful body cannot be truncated: half a JSON document is
-    // not a smaller answer.
+    // The status decides which ceiling applies, before a byte is read. An
+    // error body is only ever quoted back after being cut to 2 000 characters,
+    // so it gets a ceiling of its own and is truncated rather than refused —
+    // that keeps the status code, which is the diagnostic, instead of
+    // replacing it with a size complaint. A successful body cannot be
+    // truncated: half a JSON document is not a smaller answer.
     const { text, truncated } = await readCapped(
       response as unknown as Response,
-      MAX_RESPONSE_BYTES,
+      response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_BYTES,
       !response.ok
     );
 
@@ -217,14 +241,14 @@ export class AudiobookshelfApi {
 
     const contentType = response.headers.get('content-type') ?? '';
     if (!contentType.includes('application/json')) {
-      throw new UnexpectedContentTypeError(path, contentType);
+      throw new UnexpectedContentTypeError(path, quoted(contentType));
     }
     try {
       return JSON.parse(text);
     } catch {
       throw new UnexpectedContentTypeError(
         path,
-        `${contentType} (unparseable)`
+        `${quoted(contentType)} (unparseable)`
       );
     }
   }

@@ -46,11 +46,18 @@ async function connect(
 }
 
 function mockJson(body: unknown): ReturnType<typeof vi.spyOn> {
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
+  // A fresh Response per call, not one shared instance. A body can only be
+  // read once, and a tool that reads before it writes — as
+  // remove_items_from_playlist now does, to find out whether the removal
+  // empties the playlist — would get "ReadableStream is locked" on its second
+  // request rather than the fixture.
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    )
   ) as ReturnType<typeof vi.spyOn>;
 }
 
@@ -216,8 +223,13 @@ describe('server', () => {
       })
       .map((tool) => tool.name)
       .toSorted();
-    // The ones whose answer is this server's own: an id it was given, the
-    // account it authenticates as, counters the instance keeps about itself.
+    // The ones whose answer is this server's own: an id it was given, a
+    // position it was asked to store, the version string of the instance, and
+    // the library names and folder paths the operator typed. `get_me` and
+    // `get_library_stats` are deliberately *not* here — the first carries the
+    // bookmark titles and selected tags of an account, the second the titles
+    // and authors of the longest and largest items, all of which somebody else
+    // wrote.
     expect(plainTools).toEqual(
       [
         'delete_collection',
@@ -225,8 +237,6 @@ describe('server', () => {
         'delete_playlist',
         'delete_bookmark',
         'get_library',
-        'get_library_stats',
-        'get_me',
         'get_media_progress',
         'get_server_status',
         'list_libraries',

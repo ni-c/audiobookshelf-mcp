@@ -12,16 +12,21 @@ import {
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
-import { confirmTokenParam, detailParam } from '../schema.js';
-import { compactCollection, listFrom } from '../shape.js';
+import { quoted } from '../clean.js';
+import {
+  confirmTokenParam,
+  detailParam,
+  idParam,
+  MAX_ID_LENGTH,
+} from '../schema.js';
+import { asRecord, compactCollection, listFrom, objectsOf } from '../shape.js';
 
-const collectionIdParam = z
-  .string()
-  .min(1)
-  .describe('Collection id, as returned by list_collections');
+const collectionIdParam = idParam(
+  'Collection id, as returned by list_collections'
+);
 
 const libraryItemIdsParam = z
-  .array(z.string().min(1))
+  .array(z.string().min(1).max(MAX_ID_LENGTH))
   .min(1)
   .max(200)
   .describe('Library item ids of books');
@@ -39,11 +44,7 @@ export function registerCollectionReadTools(
         'library_id it returns the collections of every accessible library. ' +
         'Collections are shared server-wide; playlists are private per user.',
       inputSchema: z.object({
-        library_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Restrict the result to this library'),
+        library_id: idParam('Restrict the result to this library').optional(),
         detail: detailParam,
       }),
       annotations: READ_ONLY,
@@ -60,7 +61,7 @@ export function registerCollectionReadTools(
           numCollections: collections.length,
           collections:
             detail === 'full'
-              ? collections
+              ? objectsOf(collections)
               : collections.map(compactCollection),
         });
       })
@@ -85,7 +86,7 @@ export function registerCollectionReadTools(
           `/api/collections/${assertPathSegment(collection_id, 'collection_id')}`
         );
         return untrustedJsonResult(
-          detail === 'full' ? data : compactCollection(data)
+          detail === 'full' ? asRecord(data) : compactCollection(data)
         );
       })
   );
@@ -106,10 +107,7 @@ export function registerCollectionWriteTools(
         'collections, so at least one library item id is required, and every ' +
         'item must be a book from the given library.',
       inputSchema: z.object({
-        library_id: z
-          .string()
-          .min(1)
-          .describe('Library the collection belongs to'),
+        library_id: idParam('Library the collection belongs to'),
         name: z.string().min(1).max(255).describe('Collection name'),
         description: z
           .string()
@@ -168,7 +166,7 @@ export function registerCollectionWriteTools(
           .optional()
           .describe('New description'),
         library_item_ids: z
-          .array(z.string().min(1))
+          .array(z.string().min(1).max(MAX_ID_LENGTH))
           .min(1)
           .max(200)
           .optional()
@@ -230,26 +228,66 @@ export function registerCollectionWriteTools(
         // the old text back, and a dialog in front of every rename is how
         // people learn to tick without reading.
         if (books !== undefined) {
+          // Everything the call will write, named in the sentence and bound
+          // into the key — not just the reorder that opened the dialog.
+          //
+          // The gate fires on the reorder because that is the part with no way
+          // back; a rename on its own stays free, and deliberately so. But the
+          // same call may carry a name and a description, and those used to
+          // ride along unnamed and unbound: a token issued for "reorder these
+          // books" executed a second call that reordered the same books and
+          // renamed the collection to something else entirely. What the person
+          // reads is now what the token binds.
+          const alsoWritten = [
+            name === undefined ? undefined : 'rename it',
+            description === undefined ? undefined : 'replace its description',
+          ].filter((part): part is string => part !== undefined);
           const outcome = await approval.requestApproval(
             server,
             mcp,
             confirmations,
             {
-              // Ids only: a collection name is user-controlled content and this
-              // string is read by a model as well as by a person.
-              what: `reorder the books in collection ${safeCollection}`,
+              // Ids only in this sentence: a collection name is user-controlled
+              // content and it is read by a model as well as by a person. The
+              // caller's new values go on their own labelled lines below.
+              what:
+                `reorder the ${books.length} books in collection ${safeCollection}` +
+                (alsoWritten.length > 0
+                  ? `, and ${alsoWritten.join(' and ')}`
+                  : ''),
               consequence:
                 'The order somebody arranged is replaced and cannot be ' +
                 'reconstructed from here. Nothing leaves the collection: this ' +
                 'sorts the books it already has, and a book left out of the ' +
-                'list moves to the front rather than being removed.',
+                'list moves to the front rather than being removed.' +
+                (alsoWritten.length > 0
+                  ? ' The name and description it replaces are not recoverable ' +
+                    'from here either.'
+                  : ''),
+              details: [
+                ...(name === undefined
+                  ? []
+                  : [{ label: 'New name', value: quoted(name, 200) }]),
+                ...(description === undefined
+                  ? []
+                  : [
+                      {
+                        label: 'New description',
+                        value: quoted(description, 200),
+                      },
+                    ]),
+              ],
               // The order *is* part of what this tool changes, so the key must
               // tell [A, B] from [B, A]. `setResourceKey` sorts its list before
               // fingerprinting and would give both the same key;
               // `orderedResourceKey` binds every part to its position itself,
-              // which this site used to do by hand with an index prefix.
+              // which this site used to do by hand with an index prefix. The
+              // two text fields are parts of the same tuple, so a token for one
+              // name cannot be redeemed for another.
               resourceKey: orderedResourceKey('update_collection:books', [
                 `collection:${safeCollection}`,
+                `name:${name ?? ''}`,
+                `description:${description ?? ''}`,
                 ...books,
               ]),
               token: confirm_token,

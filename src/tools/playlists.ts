@@ -12,13 +12,16 @@ import {
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
-import { confirmTokenParam, detailParam } from '../schema.js';
-import { compactPlaylist, listFrom } from '../shape.js';
+import { quoted } from '../clean.js';
+import {
+  confirmTokenParam,
+  detailParam,
+  idParam,
+  MAX_ID_LENGTH,
+} from '../schema.js';
+import { asRecord, compactPlaylist, listFrom, objectsOf } from '../shape.js';
 
-const playlistIdParam = z
-  .string()
-  .min(1)
-  .describe('Playlist id, as returned by list_playlists');
+const playlistIdParam = idParam('Playlist id, as returned by list_playlists');
 
 /**
  * Audiobookshelf keeps playlists homogeneous: either every entry carries an
@@ -28,10 +31,11 @@ const playlistIdParam = z
 const playlistItemsParam = z
   .array(
     z.object({
-      library_item_id: z.string().min(1).describe('Library item id'),
+      library_item_id: idParam('Library item id'),
       episode_id: z
         .string()
         .min(1)
+        .max(MAX_ID_LENGTH)
         .optional()
         .describe(
           'Podcast episode id — required for podcast playlists, must be omitted ' +
@@ -45,6 +49,20 @@ type PlaylistItemInput = {
   library_item_id: string;
   episode_id?: string | undefined;
 };
+
+/**
+ * How one playlist entry is named when it is compared or keyed.
+ *
+ * The pair (library item, episode) is the identity of an entry, and both parts
+ * have been through `assertPathSegment` wherever this is used — so neither can
+ * contain the separator and two different entries cannot share a name.
+ */
+function entryIdentity(entry: {
+  libraryItemId?: unknown;
+  episodeId?: unknown;
+}): string {
+  return `${String(entry.libraryItemId ?? '')}/${String(entry.episodeId ?? '')}`;
+}
 
 function toApiItems(items: PlaylistItemInput[]): Record<string, string>[] {
   return items.map((item) => ({
@@ -69,11 +87,7 @@ export function registerPlaylistReadTools(
         'user and can hold books or podcast episodes; collections are shared ' +
         'server-wide and hold books only.',
       inputSchema: z.object({
-        library_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Restrict the result to this library'),
+        library_id: idParam('Restrict the result to this library').optional(),
         detail: detailParam,
       }),
       annotations: READ_ONLY,
@@ -89,7 +103,9 @@ export function registerPlaylistReadTools(
         return untrustedJsonResult({
           numPlaylists: playlists.length,
           playlists:
-            detail === 'full' ? playlists : playlists.map(compactPlaylist),
+            detail === 'full'
+              ? objectsOf(playlists)
+              : playlists.map(compactPlaylist),
         });
       })
   );
@@ -112,7 +128,7 @@ export function registerPlaylistReadTools(
           `/api/playlists/${assertPathSegment(playlist_id, 'playlist_id')}`
         );
         return untrustedJsonResult(
-          detail === 'full' ? data : compactPlaylist(data)
+          detail === 'full' ? asRecord(data) : compactPlaylist(data)
         );
       })
   );
@@ -122,7 +138,16 @@ export function registerPlaylistWriteTools(
   server: McpServer,
   api: AudiobookshelfApi,
   confirmations: ConfirmationStore,
-  approval: Approver
+  approval: Approver,
+  /**
+   * Whether `delete_playlist` is one of the tools this server registered.
+   *
+   * `remove_items_from_playlist` needs to know, because Audiobookshelf deletes
+   * a playlist outright once its last entry is removed — so on an instance
+   * where the operator took the delete tool away, emptying a playlist is the
+   * capability they removed, arriving through a different name.
+   */
+  canDeletePlaylists: boolean
 ): void {
   server.registerTool(
     'create_playlist',
@@ -132,10 +157,7 @@ export function registerPlaylistWriteTools(
         'Creates a playlist for the API key’s user. Unlike a collection it may ' +
         'start out empty and it may hold podcast episodes.',
       inputSchema: z.object({
-        library_id: z
-          .string()
-          .min(1)
-          .describe('Library the playlist belongs to'),
+        library_id: idParam('Library the playlist belongs to'),
         name: z.string().min(1).max(255).describe('Playlist name'),
         description: z
           .string()
@@ -232,26 +254,61 @@ export function registerPlaylistWriteTools(
         // does replace is the order somebody arranged, which is what
         // `remove_items_from_playlist` names as its own reason for asking.
         if (entries !== undefined) {
+          // Everything the call will write, named in the sentence and bound
+          // into the key — see the longer note in `update_collection`. A token
+          // issued for "reorder these entries" used to execute a second call
+          // that reordered the same entries and renamed the playlist to
+          // something the person never saw.
+          const alsoWritten = [
+            name === undefined ? undefined : 'rename it',
+            description === undefined ? undefined : 'replace its description',
+          ].filter((part): part is string => part !== undefined);
           const outcome = await approval.requestApproval(
             server,
             mcp,
             confirmations,
             {
-              // Ids only: a playlist name is user-controlled content and this
-              // string is read by a model as well as by a person.
-              what: `reorder the ${entries.length} entries of playlist ${safePlaylist}`,
+              // Ids only in this sentence: a playlist name is user-controlled
+              // content and it is read by a model as well as by a person. The
+              // caller's new values go on their own labelled lines below.
+              what:
+                `reorder the ${entries.length} entries of playlist ${safePlaylist}` +
+                (alsoWritten.length > 0
+                  ? `, and ${alsoWritten.join(' and ')}`
+                  : ''),
               consequence:
                 'The order somebody arranged is replaced and cannot be ' +
                 'reconstructed from here. Nothing leaves the playlist: ' +
                 'Audiobookshelf refuses a list that is not exactly the current ' +
-                'entries.',
+                'entries.' +
+                (alsoWritten.length > 0
+                  ? ' The name and description it replaces are not recoverable ' +
+                    'from here either.'
+                  : ''),
+              details: [
+                ...(name === undefined
+                  ? []
+                  : [{ label: 'New name', value: quoted(name, 200) }]),
+                ...(description === undefined
+                  ? []
+                  : [
+                      {
+                        label: 'New description',
+                        value: quoted(description, 200),
+                      },
+                    ]),
+              ],
               // The order *is* the change this tool makes, so the key must
               // tell [A, B] from [B, A]. `setResourceKey` sorts its list before
               // fingerprinting and would give both the same key;
               // `orderedResourceKey` binds every part to its position itself,
-              // which this site used to do by hand with an index prefix.
+              // which this site used to do by hand with an index prefix. The
+              // two text fields are parts of the same tuple, so a token for one
+              // name cannot be redeemed for another.
               resourceKey: orderedResourceKey('update_playlist:items', [
                 `playlist:${safePlaylist}`,
+                `name:${name ?? ''}`,
+                `description:${description ?? ''}`,
                 ...entries.map(
                   (entry) =>
                     `${String(entry.libraryItemId)}/${String(entry.episodeId ?? '')}`
@@ -341,6 +398,42 @@ export function registerPlaylistWriteTools(
     async ({ playlist_id, items, confirm_token }, mcp) =>
       run(async () => {
         const safeId = assertPathSegment(playlist_id, 'playlist_id');
+        // Validated *before* the dialog, and the key built from the validated
+        // form. `toApiItems` is what runs `assertPathSegment` over every id,
+        // and it used to run after the approval — so the person was asked
+        // about ids that had not been checked yet, and a call that could not
+        // run spent an approval on the way to failing.
+        const entries = toApiItems(items);
+
+        // Read first, because "remove some entries" and "delete the playlist"
+        // are the same call here. Audiobookshelf deletes a playlist outright
+        // once its last entry is removed, so a removal that covers everything
+        // is a deletion — and on a server where the operator took
+        // `delete_playlist` away, letting it through would hand back the
+        // capability they removed under a different name.
+        const before = objectsOf(
+          listFrom(await api.get(`/api/playlists/${safeId}`), 'items')
+        );
+        const removing = new Set(entries.map(entryIdentity));
+        const remaining = before.filter(
+          (entry) => !removing.has(entryIdentity(entry))
+        );
+        // Only when the instance actually listed the entries: an empty listing
+        // is "we could not tell", not "nothing is left", and refusing on that
+        // would break the tool whenever the read fails.
+        const emptiesPlaylist = before.length > 0 && remaining.length === 0;
+
+        if (emptiesPlaylist && !canDeletePlaylists) {
+          return errorResult(
+            `Refusing: removing these ${entries.length} entries would leave ` +
+              `playlist ${safeId} empty, and Audiobookshelf deletes a playlist ` +
+              'once its last entry is removed. This server was started without ' +
+              'delete_playlist, so deleting a playlist is not a capability it ' +
+              'offers. Remove fewer entries, or start the server with ' +
+              'delete_playlist available.'
+          );
+        }
+
         const outcome = await approval.requestApproval(
           server,
           mcp,
@@ -348,15 +441,22 @@ export function registerPlaylistWriteTools(
           {
             // Ids only: a playlist name is user-controlled content and this
             // string is read by a model as well as by a person.
-            what: `remove ${items.length} entr${items.length === 1 ? 'y' : 'ies'} from playlist ${safeId}`,
-            consequence:
-              'Audiobookshelf deletes a playlist outright once its last entry ' +
-              'is removed, and a deleted playlist cannot be restored. Where ' +
-              'entries remain, adding them back appends them at the end — the ' +
-              'order is not recoverable from here.',
+            what:
+              `remove ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} from playlist ${safeId}` +
+              (emptiesPlaylist
+                ? ', which removes its last entry and therefore deletes the playlist'
+                : ''),
+            consequence: emptiesPlaylist
+              ? 'Audiobookshelf deletes a playlist outright once its last entry ' +
+                'is removed, so this deletes the playlist. It cannot be ' +
+                'restored — it would have to be created again from scratch.'
+              : 'Adding the entries back with add_items_to_playlist appends ' +
+                'them at the end — the order is not recoverable from here. ' +
+                'Audiobookshelf would delete the playlist outright if this ' +
+                'removed the last entry, which it does not.',
             resourceKey: setResourceKey('remove_items_from_playlist', [
               safeId,
-              ...items.map((item) => JSON.stringify(item)),
+              ...entries.map(entryIdentity),
             ]),
             token: confirm_token,
             toolName: 'remove_items_from_playlist',
@@ -373,7 +473,7 @@ export function registerPlaylistWriteTools(
 
         const updated = await api.post(
           `/api/playlists/${safeId}/batch/remove`,
-          { items: toApiItems(items) }
+          { items: entries }
         );
         const shaped = compactPlaylist(updated);
         // The API answers with the playlist as it was, so an emptied playlist is

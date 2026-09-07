@@ -5,21 +5,23 @@ import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
 
 import { assertPathSegment, type AudiobookshelfApi } from '../api.js';
+import { asRecord } from '../shape.js';
 import {
   errorResult,
   jsonResult,
   run,
   untrustedJsonResult,
 } from '../result.js';
-import { confirmTokenParam, libraryItemIdParam } from '../schema.js';
+import {
+  confirmTokenParam,
+  idParam,
+  libraryItemIdParam,
+  MAX_TIME_SECONDS,
+} from '../schema.js';
 
-const episodeIdParam = z
-  .string()
-  .min(1)
-  .optional()
-  .describe(
-    'Podcast episode id — required to address a podcast episode, omitted for books'
-  );
+const episodeIdParam = idParam(
+  'Podcast episode id — required to address a podcast episode, omitted for books'
+).optional();
 
 export function registerProgressWriteTools(
   server: McpServer,
@@ -43,6 +45,7 @@ export function registerProgressWriteTools(
         current_time: z
           .number()
           .min(0)
+          .max(MAX_TIME_SECONDS)
           .optional()
           .describe('New playback position in seconds'),
         progress: z
@@ -129,8 +132,14 @@ export function registerProgressWriteTools(
 
         // The endpoint answers with 200 and no body; read the result back so the
         // model sees the state that actually got stored.
+        // `asRecord`: the readback is a GET whose 200 can carry no body at
+        // all, and the output schema promises `progress` is an object — an
+        // empty answer failed the whole call after the write had happened.
         const updated = await api.get(path);
-        return untrustedJsonResult({ updated: true, progress: updated });
+        return untrustedJsonResult({
+          updated: true,
+          progress: asRecord(updated),
+        });
       })
   );
 
@@ -145,12 +154,9 @@ export function registerProgressWriteTools(
         'library item id. Asks a person first; where the client cannot show a ' +
         'dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        media_progress_id: z
-          .string()
-          .min(1)
-          .describe(
-            'Media progress id, from the "id" field of get_media_progress'
-          ),
+        media_progress_id: idParam(
+          'Media progress id, from the "id" field of get_media_progress'
+        ),
         confirm_token: confirmTokenParam,
       }),
       annotations: {
@@ -223,6 +229,7 @@ export function registerBookmarkWriteTools(
         time: z
           .number()
           .min(0)
+          .max(MAX_TIME_SECONDS)
           .describe('Position in seconds where the bookmark is placed'),
         title: z.string().min(1).max(255).describe('Bookmark title'),
       }),
@@ -241,7 +248,10 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return untrustedJsonResult({ created: true, bookmark: created });
+        return untrustedJsonResult({
+          created: true,
+          bookmark: asRecord(created),
+        });
       })
   );
 
@@ -257,6 +267,7 @@ export function registerBookmarkWriteTools(
         time: z
           .number()
           .min(0)
+          .max(MAX_TIME_SECONDS)
           .describe('Position in seconds identifying the bookmark'),
         title: z.string().min(1).max(255).describe('New bookmark title'),
       }),
@@ -275,7 +286,10 @@ export function registerBookmarkWriteTools(
           `/api/me/item/${assertPathSegment(library_item_id, 'library_item_id')}/bookmark`,
           { time, title }
         );
-        return untrustedJsonResult({ updated: true, bookmark: updated });
+        return untrustedJsonResult({
+          updated: true,
+          bookmark: asRecord(updated),
+        });
       })
   );
 
@@ -292,6 +306,7 @@ export function registerBookmarkWriteTools(
         time: z
           .number()
           .min(0)
+          .max(MAX_TIME_SECONDS)
           .describe('Position in seconds identifying the bookmark'),
         confirm_token: confirmTokenParam,
       }),

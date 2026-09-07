@@ -73,6 +73,11 @@ async function connect(
     client.connect(clientTransport),
     server.connect(serverTransport),
   ]);
+  // Listed once, before any call. A client that has loaded tools/list checks
+  // every successful result against the declared output schema, and this suite
+  // never did — which is why seventeen answers that fail that check went
+  // unnoticed through 294 green tests.
+  await client.listTools();
   return Object.assign(client, { prompts });
 }
 
@@ -88,6 +93,19 @@ function mockFetch(body: unknown = GENERIC_BODY) {
 }
 
 type Call = { url: string; method: string; body: unknown };
+
+/**
+ * The calls that changed something.
+ *
+ * A guarded tool may read before it asks — `remove_items_from_playlist` looks
+ * up the playlist to find out whether the removal takes its last entry, which
+ * Audiobookshelf answers by deleting the playlist. What the tests here mean by
+ * "nothing happened without an answer" is that nothing was *written*, so they
+ * assert on this rather than on the fetch spy as a whole.
+ */
+function writesOf(spy: { mock: { calls: unknown[][] } }): Call[] {
+  return callsOf(spy).filter((call) => call.method !== 'GET');
+}
 
 function callsOf(spy: { mock: { calls: unknown[][] } }): Call[] {
   return spy.mock.calls.map(([url, init]) => {
@@ -399,7 +417,7 @@ describe('write tools', () => {
       const client = await connect();
 
       const first = await client.callTool({ name, arguments: args });
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
       const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
       expect(token).toBeDefined();
 
@@ -409,14 +427,14 @@ describe('write tools', () => {
       });
       expect(wrong.isError).toBe(true);
       expect(firstText(wrong)).toContain('issued for different arguments');
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
 
       const second = await client.callTool({
         name,
         arguments: { ...args, confirm_token: token },
       });
       expect(second.isError).toBeFalsy();
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(writesOf(spy)).toHaveLength(1);
     }
   );
 
@@ -527,7 +545,9 @@ describe('write tools', () => {
 
       expect(client.prompts).toHaveLength(1);
       expect(result.isError).toBeFalsy();
-      const call = callsOf(spy)[0]!;
+      const writes = writesOf(spy);
+      expect(writes).toHaveLength(1);
+      const call = writes[0]!;
       expect(new URL(call.url).pathname).toBe(path);
       expect(call.method).toBe('POST');
       expect(call.body).toEqual(body);
@@ -562,7 +582,7 @@ describe('write tools', () => {
       const client = await connect({}, 'decline');
       const result = await client.callTool({ name, arguments: args });
       expect(result.isError).toBe(true);
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
     }
   );
 
@@ -593,7 +613,7 @@ describe('write tools', () => {
       const client = await connect();
 
       const first = await client.callTool({ name, arguments: args });
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
       const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
       expect(token).toBeDefined();
 
@@ -605,14 +625,14 @@ describe('write tools', () => {
       });
       expect(wrong.isError).toBe(true);
       expect(firstText(wrong)).toContain('issued for different arguments');
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
 
       const second = await client.callTool({
         name,
         arguments: { ...args, confirm_token: token },
       });
       expect(second.isError).toBeFalsy();
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(writesOf(spy)).toHaveLength(1);
     }
   );
 
