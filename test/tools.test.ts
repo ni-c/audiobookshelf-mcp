@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 
 import type { Config } from '../src/config.js';
 import { createServer } from '../src/server.js';
@@ -72,6 +73,11 @@ async function connect(
     client.connect(clientTransport),
     server.connect(serverTransport),
   ]);
+  // Listed once, before any call. A client that has loaded tools/list checks
+  // every successful result against the declared output schema, and this suite
+  // never did — which is why seventeen answers that fail that check went
+  // unnoticed through 294 green tests.
+  await client.listTools();
   return Object.assign(client, { prompts });
 }
 
@@ -87,6 +93,19 @@ function mockFetch(body: unknown = GENERIC_BODY) {
 }
 
 type Call = { url: string; method: string; body: unknown };
+
+/**
+ * The calls that changed something.
+ *
+ * A guarded tool may read before it asks — `remove_items_from_playlist` looks
+ * up the playlist to find out whether the removal takes its last entry, which
+ * Audiobookshelf answers by deleting the playlist. What the tests here mean by
+ * "nothing happened without an answer" is that nothing was *written*, so they
+ * assert on this rather than on the fetch spy as a whole.
+ */
+function writesOf(spy: { mock: { calls: unknown[][] } }): Call[] {
+  return callsOf(spy).filter((call) => call.method !== 'GET');
+}
 
 function callsOf(spy: { mock: { calls: unknown[][] } }): Call[] {
   return spy.mock.calls.map(([url, init]) => {
@@ -348,6 +367,21 @@ describe('write tools', () => {
     }
   );
 
+  it('keys a tuple by position, where a set would not', () => {
+    // `setResourceKey` sorts its parts, so [A, B] and [B, A] share a key;
+    // `orderedResourceKey` binds each part to its index. The three tools
+    // below key a tuple and rely on the second.
+    expect(setResourceKey('op', ['a', 'b'])).toBe(
+      setResourceKey('op', ['b', 'a'])
+    );
+    expect(orderedResourceKey('op', ['a', 'b'])).not.toBe(
+      orderedResourceKey('op', ['b', 'a'])
+    );
+    expect(orderedResourceKey('op', ['a', 'b'])).toBe(
+      orderedResourceKey('op', ['a', 'b'])
+    );
+  });
+
   it.each([
     [
       'update_collection',
@@ -365,18 +399,25 @@ describe('write tools', () => {
         items: [{ library_item_id: 'li_2' }, { library_item_id: 'li_1' }],
       },
     ],
+    [
+      // The pair (item, seconds), swapped: a set key would sort both to
+      // ["120", "90"] and hand the second call the first call's token.
+      'delete_bookmark',
+      { library_item_id: '90', time: 120 },
+      { library_item_id: '120', time: 90 },
+    ],
   ] as [string, Record<string, unknown>, Record<string, unknown>][])(
     '%s binds its token to the order, not just to the set',
     async (name, args, reordered) => {
       // `setResourceKey` sorts its target list before fingerprinting, so a
-      // bare list of ids would give [A, B] and [B, A] the same key — and the
-      // order is precisely what this half of the tool changes. Each target
-      // carries its position.
+      // bare list would give [A, B] and [B, A] the same key — and for the
+      // reorders the order is precisely what the tool changes. The key comes
+      // from `orderedResourceKey`, which binds each part to its position.
       const spy = mockFetch();
       const client = await connect();
 
       const first = await client.callTool({ name, arguments: args });
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
       const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
       expect(token).toBeDefined();
 
@@ -386,14 +427,14 @@ describe('write tools', () => {
       });
       expect(wrong.isError).toBe(true);
       expect(firstText(wrong)).toContain('issued for different arguments');
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
 
       const second = await client.callTool({
         name,
         arguments: { ...args, confirm_token: token },
       });
       expect(second.isError).toBeFalsy();
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(writesOf(spy)).toHaveLength(1);
     }
   );
 
@@ -504,7 +545,9 @@ describe('write tools', () => {
 
       expect(client.prompts).toHaveLength(1);
       expect(result.isError).toBeFalsy();
-      const call = callsOf(spy)[0]!;
+      const writes = writesOf(spy);
+      expect(writes).toHaveLength(1);
+      const call = writes[0]!;
       expect(new URL(call.url).pathname).toBe(path);
       expect(call.method).toBe('POST');
       expect(call.body).toEqual(body);
@@ -539,7 +582,7 @@ describe('write tools', () => {
       const client = await connect({}, 'decline');
       const result = await client.callTool({ name, arguments: args });
       expect(result.isError).toBe(true);
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
     }
   );
 
@@ -570,7 +613,7 @@ describe('write tools', () => {
       const client = await connect();
 
       const first = await client.callTool({ name, arguments: args });
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
       const token = /confirm_token="([a-f0-9]+)"/.exec(firstText(first))?.[1];
       expect(token).toBeDefined();
 
@@ -582,14 +625,14 @@ describe('write tools', () => {
       });
       expect(wrong.isError).toBe(true);
       expect(firstText(wrong)).toContain('issued for different arguments');
-      expect(spy).not.toHaveBeenCalled();
+      expect(writesOf(spy)).toHaveLength(0);
 
       const second = await client.callTool({
         name,
         arguments: { ...args, confirm_token: token },
       });
       expect(second.isError).toBeFalsy();
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(writesOf(spy)).toHaveLength(1);
     }
   );
 

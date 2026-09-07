@@ -3,19 +3,24 @@ import { marked, plain, record } from '../output-schema.js';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   detailParam,
+  idParam,
   libraryItemIdParam,
   limitParam,
   pageParam,
 } from '../schema.js';
 import {
+  asRecord,
   compactBookmark,
   compactLibraryItem,
   compactListeningSession,
   compactListeningStats,
   compactMediaProgress,
   compactUser,
+  finiteNumber,
   listFrom,
+  objectsOf,
 } from '../shape.js';
+import { redactCredentials } from '../clean.js';
 
 import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
@@ -36,17 +41,33 @@ export function registerMeReadTools(
         'Returns the Audiobookshelf user the API key acts on behalf of, with ' +
         'their permissions and accessible libraries. The compact projection ' +
         'reports media progress and bookmarks as counts — the full user object ' +
-        'embeds every single one of them.',
+        'embeds every single one of them. Credential fields are removed from ' +
+        'both projections.',
       inputSchema: z.object({
         detail: detailParam,
       }),
       annotations: READ_ONLY,
-      outputSchema: plain(),
+      outputSchema: marked({ credentials_removed: z.array(z.string()) }),
     },
     async ({ detail }) =>
       run(async () => {
         const data = await api.get('/api/me');
-        return jsonResult(detail === 'full' ? data : compactUser(data));
+        // `GET /api/me` answers with `User.toOldJSONForBrowser()`, and
+        // `MeController.getCurrentUser` calls it without `hideRootToken` — so
+        // the document carries `token`, the account's old non-expiring access
+        // token, for a root account included. The compact projection never
+        // named the field; `detail: "full"` handed the record on whole, which
+        // put a credential that outlives this process into a model's context.
+        //
+        // Redacted rather than projected around: the API is not this server's
+        // to promise, and the next release is free to add a second one.
+        const { value, report } = redactCredentials(data);
+        return untrustedJsonResult({
+          ...(detail === 'full'
+            ? asRecord(value)
+            : compactUser(asRecord(value))),
+          credentials_removed: report.removed,
+        });
       })
   );
 
@@ -78,7 +99,9 @@ export function registerMeReadTools(
         return untrustedJsonResult({
           numReturned: items.length,
           libraryItems:
-            detail === 'full' ? items : items.map((i) => compactLibraryItem(i)),
+            detail === 'full'
+              ? objectsOf(items)
+              : items.map((i) => compactLibraryItem(i)),
         });
       })
   );
@@ -93,11 +116,7 @@ export function registerMeReadTools(
         'error when the item has never been started.',
       inputSchema: z.object({
         library_item_id: libraryItemIdParam,
-        episode_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(EPISODE_ID_DESCRIPTION),
+        episode_id: idParam(EPISODE_ID_DESCRIPTION).optional(),
         detail: detailParam,
       }),
       annotations: READ_ONLY,
@@ -183,18 +202,20 @@ export function registerMeReadTools(
     },
     async ({ page, limit, detail }) =>
       run(async () => {
-        const data = (await api.get(
-          '/api/me/listening-sessions' +
-            query({ page: page ?? 0, itemsPerPage: limit ?? 10 })
-        )) as Record<string, unknown>;
+        const data = asRecord(
+          await api.get(
+            '/api/me/listening-sessions' +
+              query({ page: page ?? 0, itemsPerPage: limit ?? 10 })
+          )
+        );
         const sessions = listFrom(data, 'sessions');
         return untrustedJsonResult({
-          total: data.total,
-          numPages: data.numPages,
-          page: data.page,
+          total: finiteNumber(data.total),
+          numPages: finiteNumber(data.numPages),
+          page: finiteNumber(data.page),
           sessions:
             detail === 'full'
-              ? sessions
+              ? objectsOf(sessions)
               : sessions.map(compactListeningSession),
         });
       })
@@ -211,13 +232,9 @@ export function registerMeReadTools(
         'account, so this reads /api/me and filters here. That is why there is ' +
         'no pagination — you get all of them.',
       inputSchema: z.object({
-        library_item_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            'Restrict the result to the bookmarks of this library item'
-          ),
+        library_item_id: idParam(
+          'Restrict the result to the bookmarks of this library item'
+        ).optional(),
         detail: detailParam,
       }),
       annotations: READ_ONLY,
@@ -228,20 +245,25 @@ export function registerMeReadTools(
         // `/api/me/bookmarks` does not exist — verified against 2.29.0, it is
         // a 404 whether or not an item id follows it. Bookmarks are a field on
         // the account object, so the filtering happens here.
-        const data = await api.get('/api/me');
+        // The same endpoint `get_me` reads, and the same reason to redact:
+        // this tool only projects the bookmarks, but `detail: "full"` hands
+        // the entries on as they came and the record they came from carries
+        // the account's access token two keys away.
+        const data = redactCredentials(await api.get('/api/me')).value;
         const all = listFrom(data, 'bookmarks');
         const bookmarks =
           library_item_id === undefined
             ? all
             : all.filter(
                 (bookmark) =>
-                  (bookmark as { libraryItemId?: unknown }).libraryItemId ===
-                  library_item_id
+                  asRecord(bookmark).libraryItemId === library_item_id
               );
         return untrustedJsonResult({
           numBookmarks: bookmarks.length,
           bookmarks:
-            detail === 'full' ? bookmarks : bookmarks.map(compactBookmark),
+            detail === 'full'
+              ? objectsOf(bookmarks)
+              : bookmarks.map(compactBookmark),
         });
       })
   );

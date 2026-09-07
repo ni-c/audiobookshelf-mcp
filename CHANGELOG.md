@@ -14,21 +14,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.4.0] - 2026-09-07
 
-### Changed
+### Security
 
-- `docs/reference/tools.md` is written by hand again. It used to be generated
-  from the registered tools, which kept it in step with the code at the price of
-  a page nobody could edit: `--check` compared it byte for byte, so every line
-  had to be derivable and a paragraph about how an endpoint really behaves had
-  nowhere to go. A test now asserts what the generator guaranteed — the page
-  documents exactly the tools that exist, marks exactly the `essential` preset,
-  and marks exactly the tools that ask a person first — and leaves the prose to
-  a person.
-- `homepage` in `package.json` points at the documentation site rather than at
-  the README anchor on GitHub. It is what npm shows next to the package, and
-  every one of these servers has had a documentation site for weeks.
+- **Credential fields are removed from every answer.** `GET /api/me` answers
+  with `User.toOldJSONForBrowser()`, and Audiobookshelf calls it without
+  `hideRootToken` — so the document carries `token`, the account's old
+  non-expiring access token, for a root account included. The compact
+  projection never named the field, but `detail: "full"` handed the record on
+  whole, which put a credential outliving this process into a model's context
+  and into whatever that model's operator logs. Any field whose normalised name
+  ends in `token`, `password`, `secret`, `apikey`, `passphrase`, `pash` or
+  `privatekey` is now replaced at any depth, in `get_me` and in `list_bookmarks`
+  which reads the same endpoint, and the result names what it removed rather
+  than dropping it silently.
+- **A confirmation binds every field the dialog names.** `update_collection` and
+  `update_playlist` open their dialog on the reorder, because that is the part
+  with no way back — but the same call may carry a name and a description, and
+  those rode along unnamed and unbound. A token issued for "reorder these books"
+  executed a second call that reordered the same books and renamed the
+  collection to something the person never saw. The sentence now names every
+  field the call will write, the caller's new values are shown on their own
+  labelled lines, and the resource key covers them.
+- **Emptying a playlist is deleting it, and the allowlist now knows.**
+  Audiobookshelf deletes a playlist outright once its last entry is removed, so
+  `AUDIOBOOKSHELF_DENY_TOOLS=delete_playlist` did not remove the capability.
+  `remove_items_from_playlist` reads the playlist before it asks, says in the
+  dialog when the removal takes the last entry, and refuses outright where
+  `delete_playlist` is not registered.
+- **The API key cannot leave through an error message.** There was no shape
+  check on `AUDIOBOOKSHELF_API_KEY` and no check before the request, so a key
+  pasted across two lines reached undici — whose refusal is
+  `Headers.append: "<value>" is an invalid header value.`, the whole value, which
+  `run` then answered with. The key is trimmed and checked for shape at startup
+  (printable ASCII, 8 to 4096 characters, the message naming the variable and
+  the length and never the value) and every header is checked again before the
+  request, because a `Config` can be built without `loadConfig`.
+- **Two supply-chain gaps in jobs holding an OIDC token.** The npm publish job
+  ran `npm ci` without `--ignore-scripts`, so every dependency's install hook
+  would have run while the Trusted Publishing token was available; nothing in
+  the tree declares one, which is what makes the flag free. And `mcp-publisher`
+  was fetched from `releases/latest/download` in two jobs with
+  `id-token: write` — it is now pinned to a version and verified against the
+  release's published checksum. `gh release create` gained `--verify-tag`, and
+  pull requests are checked by `actions/dependency-review-action`.
+- Podcast feed URLs are redacted. A private feed is published as
+  `https://user:token@host/feed.rss` and Audiobookshelf stores it as given, so
+  `get_library_item` handed the credential back in both channels.
+- `get_library_stats` and `get_me` answer as untrusted content. The first
+  carries the titles and authors of a library's longest and largest items, the
+  second an account's bookmark titles and selected tags — all written by
+  somebody other than the operator, and all previously framed as this server's
+  own words.
+- **mcp-approval 0.8.2.** A sealed dialog answer is single-use since 0.8.1: the same `requestState` presented again within its lifetime used to be accepted again, and with a resource key that is the same every time — a whole stream, a fixed set of targets — every replay landed. npm users on `^0.8.0` already had the fix; the Docker image is built from the lockfile and carried 0.8.0 until this release.
+- **Approval keys bound to positions.** `update_playlist` (items) and `update_collection` (books) reorder a list, and the order is the whole change, so each entry was prefixed with its index by hand before `setResourceKey` sorted the list. `delete_bookmark` keyed the pair (item, seconds) as a plain set, so a token for one pairing also matched the swapped one. All three now build their key with `orderedResourceKey` from mcp-approval 0.8.2, which binds every part to its position itself; the hand-written prefixes are gone. Keys over sets of ids — the removals, the deletions — stay on `setResourceKey`, where sorting is the point.
+
+### Fixed
+
+- **Seventeen answers the instance can give that a tool could not.** A `200`
+  with no body — which several routes legitimately send — was read as an
+  object by six tools and handed to the result budget by three more, where
+  `Buffer.byteLength(undefined)` became the tool result. A `total` of `null` or
+  `1e999` failed a whole listing, because `z.number()` refuses the `Infinity`
+  that `1e999` parses to. One `null` among the entries of a `detail: "full"`
+  list failed the answer with every good entry in it. An empty readback failed
+  `set_media_progress`, `create_bookmark` and `update_bookmark` _after_ the
+  write had happened. Every response now goes through a boundary that shapes it,
+  and a field the instance did not send is absent rather than fatal.
+- **The result budget is linear again.** It cut one candidate per round and
+  re-serialised the whole document to measure the result, so the number of
+  rounds was the instance's to choose: 2 000 text fields took 5.4 seconds, 4 000
+  took 24, and 8 000 took 105 — on the thread that serves every request. Each
+  round now collects what can be cut, spends the largest first until the
+  estimate covers the overshoot, and measures once. The same 8 000 fields take
+  42 milliseconds. And the search is recursive, so the bulk of a
+  `detail: "full"` item — `media.audioFiles`, one level down — is shortened
+  instead of making the tool refuse the answer.
+- The base URL is trimmed in one pass. `replace(/\/+$/, '')` is tried from every
+  position of a run of slashes and consumes it each time, so an operator URL
+  ending in 80 000 of them cost 1.7 seconds at startup. It is now 0.
+- A `__proto__` key from the instance no longer loses a count. The budget's
+  record of dropped entries was an object literal written with `record[key] =`,
+  which on that one name sets the prototype and drops the field — so the
+  entries were dropped and the note said nothing had been.
+- Control characters are stripped from every string and every key a result
+  carries, in both channels, and a lone surrogate is repaired. An escape
+  sequence in a book title could repaint the log of whoever read the result, and
+  a lone surrogate — legal JSON — makes a Python client raise
+  `UnicodeEncodeError`. Bidirectional marks and joiners are kept: they are
+  content in a title.
+- Backend text quoted into an error is cut, stripped and labelled as the
+  instance's words: a media type that is not `book`, a content type that is not
+  JSON, and every error body. An error body is read under a 64 KiB ceiling of
+  its own rather than the 5 MB one, so a 401 answered with a login page costs
+  what it should.
+- `remove_items_from_playlist` validates its ids before it asks about them. The
+  path check ran after the approval, so a person was asked about ids that had
+  not been checked and an approval was spent on a call that could not run.
+- Caller arguments are bounded: ids at 128 characters, a search query at 500, a
+  sort key at 100, a filter value at 1 000, `page` at a million and a playback
+  position at 10^9. Each of them reaches a URL path, a confirmation sentence or
+  an error message.
+- `-0` no longer splits the two channels of an answer: `JSON.stringify` writes
+  it as `0` while `structuredContent` keeps it.
 
 ### Added
 
@@ -44,13 +133,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `docs/reference/tools.md` is written by hand again. It used to be generated
+  from the registered tools, which kept it in step with the code at the price of
+  a page nobody could edit: `--check` compared it byte for byte, so every line
+  had to be derivable and a paragraph about how an endpoint really behaves had
+  nowhere to go. A test now asserts what the generator guaranteed — the page
+  documents exactly the tools that exist, marks exactly the `essential` preset,
+  and marks exactly the tools that ask a person first — and leaves the prose to
+  a person.
+- `homepage` in `package.json` points at the documentation site rather than at
+  the README anchor on GitHub. It is what npm shows next to the package, and
+  every one of these servers has had a documentation site for weeks.
 - Source maps are no longer published in the npm tarball. Node reads them only
   under `--enable-source-maps`, which nothing here sets, and the maps pointed at
   a `src/` this package does not ship — so a stack trace under that flag named a
   file nobody could open. `dist/**/*.js` is unchanged; the package is about a
   fifth smaller.
-
-[Unreleased]: https://github.com/ni-c/audiobookshelf-mcp/compare/v0.3.0...HEAD
+- yarn, corepack and the lockfile are gone from the runtime image, for the same
+  reason npm already was: nothing reaches them from `node dist/index.js`, and
+  each carries a vendored dependency tree for a scanner to find.
 
 ## [0.3.0] - 2026-09-03
 

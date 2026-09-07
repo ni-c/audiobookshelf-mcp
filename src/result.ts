@@ -4,6 +4,7 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { AudiobookshelfApiError } from './api.js';
+import { cleanText, cleanValue, upstreamText } from './clean.js';
 
 /**
  * Ceiling on one tool result.
@@ -38,32 +39,140 @@ export function errorResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }], isError: true };
 }
 
-/** The longest array field of a record, or none. */
-function longestArrayKey(record: Record<string, unknown>): string | undefined {
-  return Object.entries(record)
-    .filter(
-      (entry): entry is [string, unknown[]] =>
-        Array.isArray(entry[1]) && entry[1].length > 1
-    )
-    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+/** Characters of a text field kept when it has to be shortened. */
+const TEXT_FLOOR = 200;
+
+/**
+ * How deep the search for something to shrink goes, and how much of the
+ * structure it is willing to walk.
+ *
+ * Both are guards against a pathological document rather than limits anybody
+ * should meet: an expanded library item nests six levels, and the deepest
+ * thing this API returns is a personalized shelf holding items holding media
+ * holding chapters.
+ */
+const MAX_DEPTH = 12;
+const MAX_NODES = 200_000;
+
+/** How many rounds of cutting before the answer is refused. */
+const MAX_ROUNDS = 24;
+
+/** A place in the structure that can be made smaller. */
+interface Slot {
+  /** The object or array holding it, so the value can be written back. */
+  readonly container: Record<string, unknown> | unknown[];
+  readonly key: string | number;
+  /** Dotted path, used to report what was dropped. */
+  readonly path: string;
+  readonly kind: 'array' | 'string';
+  /** Serialized size of the value, as an estimate of what cutting it saves. */
+  readonly bytes: number;
 }
 
-/** The longest string field of a record beyond `floor` characters, or none. */
-function longestStringKey(
-  record: Record<string, unknown>,
-  floor: number
-): string | undefined {
-  return Object.entries(record)
-    .filter(
-      (entry): entry is [string, string] =>
-        typeof entry[1] === 'string' && entry[1].length > floor
-    )
-    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+/** Reads a value out of its container, whatever the key is called. */
+function read(
+  container: Record<string, unknown> | unknown[],
+  key: string | number
+): unknown {
+  return (container as Record<string | number, unknown>)[key];
 }
 
 /**
- * Serializes a result inside {@link MAX_RESULT_BYTES}, dropping whole entries
- * rather than characters.
+ * Writes a value back into its container.
+ *
+ * `Object.defineProperty` rather than assignment: a key of `__proto__` is an
+ * own property after `JSON.parse` and legal JSON from any backend, and
+ * `container[key] = value` on that name sets the prototype and drops the
+ * field instead — silently, so the shortened slot would be found oversized
+ * again on every round.
+ */
+function put(
+  container: Record<string, unknown> | unknown[],
+  key: string | number,
+  value: unknown
+): void {
+  Object.defineProperty(container, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/**
+ * Every place in `data` that can be made smaller, largest first.
+ *
+ * Recursive, which is the difference that matters: the oversize of a
+ * `detail: "full"` library item is `media.audioFiles`, one level down, and a
+ * collector that only looked at top-level keys had nothing to offer for it —
+ * so the tool refused the answer instead of shortening it.
+ *
+ * The slots are disjoint by construction: an array that is itself a candidate
+ * is not descended into, so its entries are counted once, in it. That keeps
+ * the estimates additive and the whole collection one pass over the document.
+ */
+function collectSlots(data: Record<string, unknown>): Slot[] {
+  const slots: Slot[] = [];
+  let nodes = 0;
+
+  const size = (value: unknown): number =>
+    byteLength(JSON.stringify(value) ?? '');
+
+  const walk = (
+    value: unknown,
+    container: Record<string, unknown> | unknown[],
+    key: string | number,
+    path: string,
+    depth: number
+  ): void => {
+    if (nodes++ > MAX_NODES || depth > MAX_DEPTH) return;
+    if (typeof value === 'string') {
+      if (value.length > TEXT_FLOOR) {
+        slots.push({
+          container,
+          key,
+          path,
+          kind: 'string',
+          bytes: size(value),
+        });
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      // An array of one cannot be halved into anything but nothing, so it is
+      // not a slot — but what is inside it still can be.
+      if (value.length > 1) {
+        slots.push({ container, key, path, kind: 'array', bytes: size(value) });
+        return;
+      }
+      for (const [index, entry] of value.entries()) {
+        walk(entry, value, index, `${path}[${index}]`, depth + 1);
+      }
+      return;
+    }
+    if (typeof value === 'object' && value !== null) {
+      const record = value as Record<string, unknown>;
+      for (const entryKey of Object.keys(record)) {
+        walk(
+          record[entryKey],
+          record,
+          entryKey,
+          path === '' ? entryKey : `${path}.${entryKey}`,
+          depth + 1
+        );
+      }
+    }
+  };
+
+  for (const key of Object.keys(data)) {
+    walk(data[key], data, key, key, 1);
+  }
+  return slots.toSorted((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * Fits a result inside {@link MAX_RESULT_BYTES}, dropping whole entries rather
+ * than characters.
  *
  * Whole entries, never a slice of the serialized JSON: a truncated document is
  * not a smaller answer, it is an unparseable one. The `truncated` block comes
@@ -72,21 +181,19 @@ function longestStringKey(
  *
  * It sits in `jsonResult` and `untrustedJsonResult` rather than in each tool,
  * so `detail: "full"` — which switches the compact projections off — is covered
- * by the same ceiling.
- */
-export function budgetedJson(data: unknown): string {
-  return JSON.stringify(budget(data), null, 2);
-}
-
-/**
- * The same, as a value rather than as text.
- *
- * Every tool declares an `outputSchema` and answers with `structuredContent`
- * beside the text block, and the two have to carry the same thing — so the
- * shrinking happens on the object and the serialization is derived from it.
+ * by the same ceiling. Every tool declares an `outputSchema` and answers with
+ * `structuredContent` beside the text block, and the two have to carry the
+ * same thing, so the shrinking happens on the object and the serialization is
+ * derived from it.
  */
 export function budget(data: unknown): Record<string, unknown> {
-  let rendered = JSON.stringify(data, null, 2);
+  // Several routes answer 200 or 204 with no body at all, and `request` maps
+  // that to `undefined`. `JSON.stringify(undefined)` is `undefined`, so the
+  // measurement below used to answer with Node's ERR_INVALID_ARG_TYPE as the
+  // tool result — from five read tools, on a legitimate answer.
+  if (data === undefined) return {};
+
+  const rendered = JSON.stringify(data, null, 2);
   if (byteLength(rendered) <= MAX_RESULT_BYTES) {
     // Wrapped when it is not already an object. A schema whose root is an
     // array or a scalar is served to a 2025-era client rewritten as
@@ -96,6 +203,9 @@ export function budget(data: unknown): Record<string, unknown> {
       ? (data as Record<string, unknown>)
       : { items: data };
   }
+  // A primitive over the budget is wrapped and handed on whole: there is no
+  // structure to thin, and cutting the one value the caller asked for would
+  // lose it rather than shorten it.
   if (data === null || typeof data !== 'object') return { items: data };
 
   if (Array.isArray(data)) {
@@ -103,11 +213,11 @@ export function budget(data: unknown): Record<string, unknown> {
   }
 
   const copy = structuredClone(data) as Record<string, unknown>;
-  const dropped: Record<string, number> = {};
+  const dropped = new Map<string, number>();
   const withNote = (): Record<string, unknown> => ({
     truncated: {
       reason: `the full result exceeded ${MAX_RESULT_BYTES} bytes`,
-      dropped_entries: { ...dropped },
+      dropped_entries: Object.fromEntries(dropped),
       follow_up:
         'Ask for fewer entries — most listing tools take limit and page, ' +
         'library_id restricts a server-wide listing to one library, and ' +
@@ -118,37 +228,81 @@ export function budget(data: unknown): Record<string, unknown> {
   const size = (value: Record<string, unknown>): number =>
     byteLength(JSON.stringify(value, null, 2));
 
-  // Halve the longest array until it fits. Halving rather than measuring: one
-  // entry can be arbitrarily large — a library item carries every audio file,
-  // track and chapter — so this has to be able to reach a single entry instead
-  // of assuming an average size.
-  for (;;) {
-    const key = longestArrayKey(copy);
-    if (key === undefined) break;
-    const items = copy[key] as unknown[];
-    const keep = Math.floor(items.length / 2);
-    dropped[key] = (dropped[key] ?? 0) + (items.length - keep);
-    copy[key] = items.slice(0, keep);
-    if (size(withNote()) <= MAX_RESULT_BYTES) return withNote();
+  // Slots already shortened, remembered by identity rather than by looking at
+  // the value. A text field whose own content ends in the note this pass
+  // appends is something anybody can write into a description, and a check
+  // that read the value would either shorten it for ever or skip a field that
+  // genuinely needs cutting.
+  const shortened = new Map<object, Set<string | number>>();
+  const isShortened = (slot: Slot): boolean =>
+    shortened.get(slot.container)?.has(slot.key) === true;
+  const markShortened = (slot: Slot): void => {
+    const keys = shortened.get(slot.container) ?? new Set<string | number>();
+    keys.add(slot.key);
+    shortened.set(slot.container, keys);
+  };
+
+  // Rounds, not one cut per measurement. Cutting a single slot and then
+  // re-serializing the whole document to see whether it fit made the number of
+  // rounds a property of the input: twenty thousand short strings cost one
+  // full serialization each. Now every round collects what can be cut, spends
+  // the largest slots first until the estimate covers the overshoot, and
+  // measures once.
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const current = size(withNote());
+    if (current <= MAX_RESULT_BYTES) return withNote();
+
+    const slots = collectSlots(copy);
+    let remaining = current - MAX_RESULT_BYTES;
+    let cut = false;
+
+    for (const slot of slots) {
+      if (remaining <= 0) break;
+      if (slot.kind === 'array') {
+        const items = read(slot.container, slot.key);
+        if (!Array.isArray(items) || items.length < 2) continue;
+        // Halving rather than computing how many entries to drop: one entry
+        // can be arbitrarily large — a library item carries every audio file,
+        // track and chapter — so this has to be able to reach a single entry
+        // instead of assuming an average size. Repeated inside the round, so
+        // one big list is thinned before a second one is touched at all.
+        let live: unknown[] = items;
+        while (remaining > 0 && live.length > 1) {
+          const keep = Math.floor(live.length / 2);
+          const saved = Math.round(
+            (slot.bytes * (live.length - keep)) / live.length
+          );
+          dropped.set(
+            slot.path,
+            (dropped.get(slot.path) ?? 0) + (live.length - keep)
+          );
+          live = live.slice(0, keep);
+          remaining -= saved;
+          cut = true;
+        }
+        put(slot.container, slot.key, live);
+        continue;
+      }
+      if (isShortened(slot)) continue;
+      const value = read(slot.container, slot.key);
+      if (typeof value !== 'string') continue;
+      const short = `${value.slice(0, TEXT_FLOOR).toWellFormed()}… (${value.length - TEXT_FLOOR} more characters omitted)`;
+      // Only when it really is shorter. The note explaining the cut is about
+      // thirty characters, so a 210-character value comes back out at 230 —
+      // and a pass that always took the longest string over the floor would
+      // take the one it had just lengthened, again, for ever.
+      if (short.length >= value.length) continue;
+      put(slot.container, slot.key, short);
+      markShortened(slot);
+      remaining -= slot.bytes - byteLength(short);
+      cut = true;
+    }
+
+    if (!cut) break;
   }
 
-  // No array left to shorten: the oversize is in the text fields of a single
-  // object. Shorten them longest-first, each one marked, so the structure
-  // survives and the reader can see what was cut.
-  for (;;) {
-    const key = longestStringKey(copy, 200);
-    if (key === undefined) break;
-    const value = copy[key] as string;
-    const shortened = `${value.slice(0, 200)}… (${value.length - 200} more characters omitted)`;
-    // Only when it really is shorter. The note explaining the cut is about
-    // thirty characters, so a 210-character value comes back out at 230 — and
-    // since this pass always takes the longest string over the floor, it would
-    // take the one it had just lengthened, again, for ever. The floor of 200 is
-    // not the guarantee it looks like; this comparison is.
-    if (shortened.length >= value.length) break;
-    copy[key] = shortened;
-    if (size(withNote()) <= MAX_RESULT_BYTES) return withNote();
-  }
+  const final = size(withNote());
+  if (final <= MAX_RESULT_BYTES) return withNote();
 
   // An error rather than an envelope saying so: the envelope is a different
   // shape from what the tool declares it returns, and the SDK refuses that.
@@ -171,11 +325,24 @@ export class ResultTooLargeError extends Error {}
  * `content` would otherwise get an empty answer.
  */
 export function jsonResult(data: unknown): CallToolResult {
-  const value = budget(data);
+  const value = cleanRecord(budget(data));
   return {
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     structuredContent: value,
   };
+}
+
+/**
+ * {@link cleanValue} over an answer, keeping its type.
+ *
+ * It runs after {@link budget} rather than before it: cleaning only ever
+ * removes characters — control characters, the credentials in a URL — so a
+ * value that fits the budget still fits afterwards, and cleaning the whole
+ * document before thinning it would clean the entries that are about to be
+ * dropped.
+ */
+function cleanRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return cleanValue(value) as Record<string, unknown>;
 }
 
 /**
@@ -195,7 +362,11 @@ export function untrustedResult(data: Record<string, unknown>): CallToolResult {
   const value = {
     untrusted: true as const,
     source: 'audiobookshelf' as const,
-    ...rest,
+    // Cleaned here rather than in each tool: this is the one door every answer
+    // built from Audiobookshelf content goes through. The two marker names
+    // above are set after the payload is cleaned and spread, so nothing in the
+    // content can move them.
+    ...cleanRecord(rest),
   };
   return {
     content: [
@@ -217,27 +388,6 @@ export function untrustedResult(data: Record<string, unknown>): CallToolResult {
  */
 export function untrustedJsonResult(data: unknown): CallToolResult {
   return untrustedResult(budget(data));
-}
-
-const MAX_ERROR_BODY_LENGTH = 2000;
-
-/**
- * Limits what an upstream error body can inject into the model context: HTML
- * error pages (reverse proxies, WAFs) are dropped entirely, other bodies are
- * truncated.
- */
-function sanitizeErrorBody(body: string): string {
-  const trimmed = body.trim();
-  // Anything markup-shaped: a reverse proxy's error page or a WAF block page.
-  // The check is deliberately loose — an XML declaration, a leading comment or
-  // a doctype followed by a newline are all the same thing here.
-  if (/^(<!doctype|<html[\s>]|<\?xml|<!--)/i.test(trimmed)) {
-    return '(HTML error page omitted)';
-  }
-  if (trimmed.length > MAX_ERROR_BODY_LENGTH) {
-    return `${trimmed.slice(0, MAX_ERROR_BODY_LENGTH)}… (truncated)`;
-  }
-  return trimmed;
 }
 
 /**
@@ -268,10 +418,13 @@ export async function run(
           'library the API key’s user cannot access.';
       }
       return errorResult(
-        `${error.message}\n${sanitizeErrorBody(error.body)}${hint}`
+        `${error.message}\n${upstreamText(error.body)}${hint}`
       );
     }
+    // Cleaned as well: this is where a `TypeError` from the HTTP layer lands,
+    // and those quote what they were given — undici's refusal of a header
+    // value repeats the value, which for this server is the API key.
     const message = error instanceof Error ? error.message : String(error);
-    return errorResult(`audiobookshelf-mcp: ${message}`);
+    return errorResult(`audiobookshelf-mcp: ${cleanText(message)}`);
   }
 }

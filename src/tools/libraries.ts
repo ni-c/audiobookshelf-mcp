@@ -9,22 +9,44 @@ import {
 } from '../filters.js';
 import {
   detailParam,
+  idParam,
   libraryIdParam,
   limitParam,
+  MAX_FILTER_VALUE_LENGTH,
+  MAX_QUERY_LENGTH,
+  MAX_SORT_LENGTH,
   pageParam,
 } from '../schema.js';
 import {
+  asRecord,
   compactAuthor,
   compactItemPage,
   compactLibrary,
   compactLibraryItem,
   compactSeries,
+  finiteNumber,
   listFrom,
+  objectsOf,
 } from '../shape.js';
 
 import { assertPathSegment, query, type AudiobookshelfApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
 import { jsonResult, run, untrustedJsonResult } from '../result.js';
+
+/**
+ * One search hit, shaped.
+ *
+ * Book and podcast matches come wrapped in `{ libraryItem, matchKey,
+ * matchText }`; the other kinds are plain entities.
+ */
+function searchHit(entry: unknown): Record<string, unknown> {
+  const hit = asRecord(entry);
+  return {
+    matchKey: hit.matchKey,
+    matchText: hit.matchText,
+    libraryItem: compactLibraryItem(hit.libraryItem),
+  };
+}
 
 const DEFAULT_ITEM_LIMIT = 25;
 const DEFAULT_SEARCH_LIMIT = 12;
@@ -65,7 +87,9 @@ export function registerLibraryReadTools(
         );
         return jsonResult({
           libraries:
-            detail === 'full' ? libraries : libraries.map(compactLibrary),
+            detail === 'full'
+              ? objectsOf(libraries)
+              : libraries.map(compactLibrary),
         });
       })
   );
@@ -88,9 +112,10 @@ export function registerLibraryReadTools(
         const data = await api.get(
           `/api/libraries/${assertPathSegment(library_id, 'library_id')}`
         );
-        const library = (data as { library?: unknown }).library ?? data;
+        const envelope = asRecord(data);
+        const library = envelope.library ?? envelope;
         return jsonResult(
-          detail === 'full' ? library : compactLibrary(library)
+          detail === 'full' ? asRecord(library) : compactLibrary(library)
         );
       })
   );
@@ -106,14 +131,18 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
       }),
       annotations: READ_ONLY,
-      outputSchema: plain(),
+      outputSchema: marked(),
     },
     async ({ library_id }) =>
       run(async () => {
         const data = await api.get(
           `/api/libraries/${assertPathSegment(library_id, 'library_id')}/stats`
         );
-        return jsonResult(data);
+        // Marked, because the answer carries the titles and authors of the
+        // longest and largest items — written by metadata providers, not by
+        // the operator. The numbers next to them do not make the strings the
+        // server's own words.
+        return untrustedJsonResult(asRecord(data));
       })
   );
 
@@ -152,7 +181,12 @@ export function registerLibraryReadTools(
         library_id: libraryIdParam,
         page: pageParam,
         limit: limitParam(DEFAULT_ITEM_LIMIT),
-        sort: z.string().min(1).optional().describe(SORT_HINT),
+        sort: z
+          .string()
+          .min(1)
+          .max(MAX_SORT_LENGTH)
+          .optional()
+          .describe(SORT_HINT),
         descending: z
           .boolean()
           .optional()
@@ -167,6 +201,7 @@ export function registerLibraryReadTools(
         filter_value: z
           .string()
           .min(1)
+          .max(MAX_FILTER_VALUE_LENGTH)
           .optional()
           .describe(
             'Value for filter_group: an id for authors/series, a name for ' +
@@ -224,7 +259,7 @@ export function registerLibraryReadTools(
             })
         );
         const shaped = compactItemPage(data, detail ?? 'compact');
-        const total = typeof shaped.total === 'number' ? shaped.total : 0;
+        const total = finiteNumber(shaped.total) ?? 0;
         const currentPage = page ?? 0;
         const seen = (currentPage + 1) * effectiveLimit;
         return untrustedJsonResult({
@@ -248,7 +283,7 @@ export function registerLibraryReadTools(
         'list_library_items with a filter for "show me all X" questions.',
       inputSchema: z.object({
         library_id: libraryIdParam,
-        q: z.string().min(1).describe('Search query'),
+        q: z.string().min(1).max(MAX_QUERY_LENGTH).describe('Search query'),
         limit: limitParam(DEFAULT_SEARCH_LIMIT),
         detail: detailParam,
       }),
@@ -257,36 +292,26 @@ export function registerLibraryReadTools(
     },
     async ({ library_id, q, limit, detail }) =>
       run(async () => {
-        const data = (await api.get(
-          `/api/libraries/${assertPathSegment(library_id, 'library_id')}/search` +
-            query({ q, limit: limit ?? DEFAULT_SEARCH_LIMIT })
-        )) as Record<string, unknown>;
+        const data = asRecord(
+          await api.get(
+            `/api/libraries/${assertPathSegment(library_id, 'library_id')}/search` +
+              query({ q, limit: limit ?? DEFAULT_SEARCH_LIMIT })
+          )
+        );
 
         if (detail === 'full') return untrustedJsonResult(data);
 
         // The search response groups matches: book/podcast hits are wrapped in
         // { libraryItem, matchKey, matchText }, the rest are plain entities.
-        const wrapped = (key: string): unknown[] =>
-          Array.isArray(data[key]) ? (data[key] as unknown[]) : [];
+        const wrapped = (key: string): unknown[] => {
+          const entry = data[key];
+          return Array.isArray(entry) ? entry : [];
+        };
         return untrustedJsonResult({
-          book: wrapped('book').map((entry) => {
-            const hit = entry as Record<string, unknown>;
-            return {
-              matchKey: hit.matchKey,
-              matchText: hit.matchText,
-              libraryItem: compactLibraryItem(hit.libraryItem),
-            };
-          }),
-          podcast: wrapped('podcast').map((entry) => {
-            const hit = entry as Record<string, unknown>;
-            return {
-              matchKey: hit.matchKey,
-              matchText: hit.matchText,
-              libraryItem: compactLibraryItem(hit.libraryItem),
-            };
-          }),
+          book: wrapped('book').map(searchHit),
+          podcast: wrapped('podcast').map(searchHit),
           series: wrapped('series').map((entry) => {
-            const hit = entry as Record<string, unknown>;
+            const hit = asRecord(entry);
             return compactSeries(hit.series ?? hit);
           }),
           authors: wrapped('authors').map((a) => compactAuthor(a)),
@@ -317,16 +342,19 @@ export function registerLibraryReadTools(
     },
     async ({ library_id, limit, detail }) =>
       run(async () => {
-        const data = (await api.get(
+        const data = await api.get(
           `/api/libraries/${assertPathSegment(library_id, 'library_id')}/personalized` +
             query({ limit: limit ?? 10 })
-        )) as unknown[];
+        );
 
-        if (detail === 'full') return untrustedJsonResult(data);
-        const shelves = Array.isArray(data) ? data : [];
+        // Normalised before *both* paths. The endpoint answers with a bare
+        // array, and `detail: "full"` used to hand whatever came back to a
+        // schema that promises `items: z.array(record)` — an object, or an
+        // empty body, failed the whole call.
+        const shelves = objectsOf(data);
+        if (detail === 'full') return untrustedJsonResult(shelves);
         return untrustedJsonResult(
-          shelves.map((entry) => {
-            const shelf = entry as Record<string, unknown>;
+          shelves.map((shelf) => {
             const entities = Array.isArray(shelf.entities)
               ? shelf.entities
               : [];
@@ -363,6 +391,7 @@ export function registerLibraryReadTools(
         sort: z
           .string()
           .min(1)
+          .max(MAX_SORT_LENGTH)
           .optional()
           .describe('Sort key, e.g. name, numBooks, addedAt, totalDuration'),
         descending: z.boolean().optional().describe('Reverse the sort order'),
@@ -378,25 +407,33 @@ export function registerLibraryReadTools(
     },
     async ({ library_id, page, limit, sort, descending, detail }) =>
       run(async () => {
-        const data = (await api.get(
-          `/api/libraries/${assertPathSegment(library_id, 'library_id')}/series` +
-            query({
-              limit: limit ?? DEFAULT_ITEM_LIMIT,
-              page: page ?? 0,
-              sort,
-              desc: descending === true ? 1 : undefined,
-              minified: 1,
-            })
-        )) as Record<string, unknown>;
+        const data = asRecord(
+          await api.get(
+            `/api/libraries/${assertPathSegment(library_id, 'library_id')}/series` +
+              query({
+                limit: limit ?? DEFAULT_ITEM_LIMIT,
+                page: page ?? 0,
+                sort,
+                desc: descending === true ? 1 : undefined,
+                minified: 1,
+              })
+          )
+        );
         const results = listFrom(data, 'series');
         return untrustedJsonResult({
-          total: data.total,
-          page: data.page,
-          limit: data.limit,
+          // Only when the instance sent a number. The output schema types
+          // these, and `z.number()` refuses the Infinity that `1e999` parses
+          // to and the NaN a missing field becomes — one bad paging value used
+          // to fail the whole listing.
+          total: finiteNumber(data.total),
+          page: finiteNumber(data.page),
+          limit: finiteNumber(data.limit),
           // Without includeBooks: the endpoint embeds every book of every series,
           // which dwarfs the series data itself.
           results:
-            detail === 'full' ? results : results.map((s) => compactSeries(s)),
+            detail === 'full'
+              ? objectsOf(results)
+              : results.map((s) => compactSeries(s)),
         });
       })
   );
@@ -410,7 +447,7 @@ export function registerLibraryReadTools(
         'with paging and sorting, use list_library_items with ' +
         'filter_group="series" instead.',
       inputSchema: z.object({
-        series_id: z.string().min(1).describe('Series id'),
+        series_id: idParam('Series id'),
         detail: detailParam,
       }),
       annotations: READ_ONLY,
@@ -456,7 +493,9 @@ export function registerLibraryReadTools(
         return untrustedJsonResult({
           numAuthors: authors.length,
           authors:
-            detail === 'full' ? authors : authors.map((a) => compactAuthor(a)),
+            detail === 'full'
+              ? objectsOf(authors)
+              : authors.map((a) => compactAuthor(a)),
         });
       })
   );
@@ -469,16 +508,14 @@ export function registerLibraryReadTools(
         'Fetches a single author, optionally with the library items attributed ' +
         'to them.',
       inputSchema: z.object({
-        author_id: z.string().min(1).describe('Author id'),
+        author_id: idParam('Author id'),
         include_items: z
           .boolean()
           .optional()
           .describe('Also return the author’s library items, default false'),
-        library_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Restrict the returned items to this library'),
+        library_id: idParam(
+          'Restrict the returned items to this library'
+        ).optional(),
         detail: detailParam,
       }),
       annotations: READ_ONLY,

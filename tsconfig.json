@@ -1,6 +1,12 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
+    // `toWellFormed` and `isWellFormed` are ES2024, and the repair of a lone
+    // surrogate is what keeps a Python client from raising UnicodeEncodeError
+    // on a title the instance sent. DOM and DOM.Iterable are named explicitly
+    // because setting `lib` at all drops the defaults — and `RequestInit`,
+    // `Response` and `fetch` in src/api.ts come from DOM.
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "Node16",
     "moduleResolution": "Node16",
     "outDir": "dist",

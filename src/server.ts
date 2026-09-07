@@ -120,10 +120,23 @@ export function createServer(config: Config): McpServer {
   // Read-only mode does not register the write tools at all. Rejecting them at
   // call time would still advertise capabilities the server refuses to provide.
   if (!config.readOnly) {
+    // What the filter left standing, as a question a tool can ask. Emptying a
+    // playlist deletes it, so `remove_items_from_playlist` has to know whether
+    // this server offers `delete_playlist` at all — an operator who took the
+    // delete tool away did not mean to keep the deletion under another name.
+    const registered = (name: string): boolean =>
+      !filter.active || filter.selected.has(name);
+
     registerProgressWriteTools(server, api, confirmations, approval);
     registerBookmarkWriteTools(server, api, confirmations, approval);
     registerCollectionWriteTools(server, api, confirmations, approval);
-    registerPlaylistWriteTools(server, api, confirmations, approval);
+    registerPlaylistWriteTools(
+      server,
+      api,
+      confirmations,
+      approval,
+      registered('delete_playlist')
+    );
   }
 
   return server;

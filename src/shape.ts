@@ -29,14 +29,57 @@ function rec(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * The same check, for the tools.
+ *
+ * `(await api.get(…)) as Record<string, unknown>` is not a check: a route that
+ * answers `200` with no body at all — several of them do — hands `undefined`
+ * to the next line, and `data.results` then throws `Cannot read properties of
+ * undefined` as the tool result. Every cast at an API boundary goes through
+ * this instead.
+ */
+export function asRecord(value: unknown): Record<string, unknown> {
+  return rec(value);
+}
+
+/**
+ * The entries of a list the API returned, with anything that is not an object
+ * left out.
+ *
+ * `detail: "full"` hands the raw array to a schema that says `z.array(record)`,
+ * and one `null` or one number among the entries fails the whole answer —
+ * every good entry with it.
+ */
+export function objectsOf(value: unknown): Record<string, unknown>[] {
+  return arr(value).filter(
+    (entry): entry is Record<string, unknown> =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+  );
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 function num(value: unknown): number | undefined {
+  // `+ 0` turns -0 into 0. `JSON.stringify(-0)` is `0` while the value in
+  // `structuredContent` stays -0, so a projected -0 makes the two channels of
+  // the same answer disagree about the same field.
   return typeof value === 'number' && Number.isFinite(value)
-    ? value
+    ? value + 0
     : undefined;
+}
+
+/**
+ * A number the API chose, on its way into a field an output schema types.
+ *
+ * `total`, `page`, `limit` and `numPages` are passed straight through from the
+ * response, and `z.number()` refuses `Infinity` and `NaN` — which is what
+ * `JSON.parse` makes of `1e999` and of a missing field. One bad paging value
+ * took the whole listing down; now the field is simply absent.
+ */
+export function finiteNumber(value: unknown): number | undefined {
+  return num(value);
 }
 
 function bool(value: unknown): boolean | undefined {
@@ -60,7 +103,8 @@ export function listFrom(value: unknown, ...keys: string[]): unknown[] {
   if (Array.isArray(value)) return value;
   const object = rec(value);
   for (const key of [...keys, 'results']) {
-    if (Array.isArray(object[key])) return object[key] as unknown[];
+    const entry = object[key];
+    if (Array.isArray(entry)) return entry;
   }
   return [];
 }
@@ -348,8 +392,13 @@ export function compactListeningStats(value: unknown): Record<string, unknown> {
   const items = rec(stats.items);
 
   const dayEntries = Object.entries(days)
-    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
-    .sort(([a], [b]) => b.localeCompare(a));
+    // `Number.isFinite`, not `typeof === 'number'`: a day total of `1e999`
+    // parses to Infinity, which `JSON.stringify` writes as `null` while
+    // `structuredContent` keeps the value — the two channels of one answer
+    // then say different things about the same day.
+    .filter((entry): entry is [string, number] => Number.isFinite(entry[1]))
+    .map(([day, seconds]): [string, number] => [day, seconds + 0])
+    .toSorted(([a], [b]) => b.localeCompare(a));
 
   const topItems = Object.values(items)
     .map((entry) => {
@@ -360,7 +409,7 @@ export function compactListeningStats(value: unknown): Record<string, unknown> {
         timeListeningSeconds: num(item.timeListening) ?? 0,
       };
     })
-    .sort((a, b) => b.timeListeningSeconds - a.timeListeningSeconds)
+    .toSorted((a, b) => b.timeListeningSeconds - a.timeListeningSeconds)
     .slice(0, TOP_ITEMS);
 
   return defined({
@@ -506,6 +555,8 @@ export function compactItemPage(
     filterBy: str(page.filterBy),
     numReturned: results.length,
     results:
-      detail === 'full' ? results : results.map((i) => compactLibraryItem(i)),
+      detail === 'full'
+        ? objectsOf(results)
+        : results.map((i) => compactLibraryItem(i)),
   });
 }

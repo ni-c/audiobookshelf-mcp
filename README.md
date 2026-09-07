@@ -205,8 +205,10 @@ answer with the fields as well.
 The tools that report library metadata carry `untrusted: true` and
 `source: "audiobookshelf"` as fields: book descriptions pulled from metadata
 providers, podcast feed summaries and episode titles are all written by someone
-else. The rest are without it — an id this server was given, the account it
-authenticates as, counters the instance keeps about itself.
+else, and so are the bookmark titles and selected tags of an account and the
+titles of a library's longest and largest items. The rest are without it — an
+id this server was given, a position it was asked to store, the version string
+of the instance, and the library names and folder paths the operator typed.
 
 The documents are described as open objects with the top-level keys this server
 builds. `detail: "full"` hands the API record back whole, so the same tool

@@ -60,17 +60,17 @@ describe('result helpers', () => {
   });
 });
 
-describe('the result budget', () => {
-  /** A record roughly the size of one shaped library item. */
-  function item(index: number): Record<string, unknown> {
-    return {
-      id: `li_${index}`,
-      title: 'A book with a reasonably long title '.repeat(4),
-      authors: ['An Author Name'],
-      description: 'A description of the book. '.repeat(20),
-    };
-  }
+/** A record roughly the size of one shaped library item. */
+function item(index: number): Record<string, unknown> {
+  return {
+    id: `li_${index}`,
+    title: 'A book with a reasonably long title '.repeat(4),
+    authors: ['An Author Name'],
+    description: 'A description of the book. '.repeat(20),
+  };
+}
 
+describe('the result budget', () => {
   it('drops whole entries rather than characters, and says so', () => {
     // Seven of the fourteen listing tools have no `limit` at all —
     // Audiobookshelf does not paginate /api/collections or /api/playlists —
@@ -190,14 +190,67 @@ describe('the result budget', () => {
     expect(value.items).toHaveLength(200_000);
   });
 
-  it('refuses when there is nothing left to drop or shorten', () => {
-    // One entry, and its bulk is nested rather than a top-level string: there
-    // is no smaller true answer to give. It used to say so in an envelope
-    // carrying an `error` field, which is a different shape from what the tool
-    // declares it returns — and the SDK refuses that. So it throws, and `run`
-    // turns it into an error result.
-    expect(() =>
+  it('reaches a text field nested inside an entry', () => {
+    // This used to be the refusal case, and it was one only because the search
+    // for something to shrink looked at top-level keys alone. The oversize of
+    // a `detail: "full"` library item is exactly this shape — the bulk sits in
+    // `media.audioFiles` or in a description one level down — so the tool
+    // answered "the response exceeds the budget" for the argument that most
+    // needs shortening.
+    const text = textOf(
       jsonResult({ results: [{ nested: { blob: 'x'.repeat(300_000) } }] })
+    );
+    const body = JSON.parse(text) as {
+      results: [{ nested: { blob: string } }];
+      truncated: unknown;
+    };
+    expect(body.results[0].nested.blob).toMatch(/more characters omitted/);
+    expect(body.truncated).toBeTruthy();
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(100_000);
+  });
+
+  it('thins an array nested inside an object', () => {
+    // The other half of the same gap: one library item, and the megabyte is in
+    // its audio files. Halving reaches them now, and the note names the path
+    // rather than just the top-level key.
+    const text = textOf(
+      jsonResult({
+        id: 'li_1',
+        media: {
+          audioFiles: Array.from({ length: 3000 }, (_, index) => ({
+            index,
+            metadata: 'x'.repeat(200),
+          })),
+        },
+      })
+    );
+    const body = JSON.parse(text) as {
+      media: { audioFiles: unknown[] };
+      truncated: { dropped_entries: Record<string, number> };
+    };
+    expect(body.media.audioFiles.length).toBeLessThan(3000);
+    expect(body.media.audioFiles.length).toBeGreaterThan(0);
+    expect(body.truncated.dropped_entries['media.audioFiles']).toBeGreaterThan(
+      0
+    );
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(100_000);
+  });
+
+  it('refuses when there is nothing left to drop or shorten', () => {
+    // Nothing shrinkable at all: the bulk is in the *keys*, which cannot be
+    // cut without changing what the answer says. It used to be reported in an
+    // envelope carrying an `error` field, which is a different shape from what
+    // the tool declares it returns — and the SDK refuses that. So it throws,
+    // and `run` turns it into an error result.
+    expect(() =>
+      jsonResult(
+        Object.fromEntries(
+          Array.from({ length: 3000 }, (_, index) => [
+            `field_${index}_${'k'.repeat(40)}`,
+            index,
+          ])
+        )
+      )
     ).toThrow(ResultTooLargeError);
   });
 

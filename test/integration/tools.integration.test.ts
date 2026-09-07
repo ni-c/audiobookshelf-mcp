@@ -80,8 +80,8 @@ describe('what the scanner made of the files', () => {
       })
     );
     expect(items.total).toBe(TITLES.length);
-    expect(items.results.map((i) => i.title).sort()).toEqual(
-      [...TITLES].sort()
+    expect(items.results.map((i) => i.title).toSorted()).toEqual(
+      TITLES.toSorted()
     );
     // The duration was probed out of the audio files, not read from a fixture.
     for (const item of items.results) {
@@ -252,8 +252,8 @@ describe('collections and playlists', () => {
       await asking.call('get_collection', { collection_id: collectionId })
     );
     // Both books are still there — nothing was removed by the short list.
-    expect(afterReorder.books.map((book) => book.id).sort()).toEqual(
-      [itemId, secondItemId].sort()
+    expect(afterReorder.books.map((book) => book.id).toSorted()).toEqual(
+      [itemId, secondItemId].toSorted()
     );
     // And the one that was left out went to the front.
     expect(afterReorder.books[0]!.id).toBe(secondItemId);
