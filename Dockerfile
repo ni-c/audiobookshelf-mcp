@@ -38,12 +38,22 @@ RUN apk add --no-cache --upgrade libcrypto3 libssl3
 # advisory. Note this does not shrink the image: the files still sit in the base
 # layer. It removes them from the final filesystem, which is what Trivy scans and
 # what a process in the container can reach.
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+# yarn and corepack ship in the same base image for the same reason and go the
+# same way: neither is reachable from `node dist/index.js`, and both carry
+# their own vendored dependency trees for a scanner to find. Verified after a
+# build with `docker run --rm --entrypoint sh <image> -c 'ls /opt
+# /usr/local/lib/node_modules; which yarn npm npx corepack'`.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+    /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# The server reports its version from package.json at runtime.
-COPY package.json package-lock.json ./
+# The server reports its version from package.json at runtime. The lockfile is
+# not copied: nothing reads it once node_modules exists, and it is the file a
+# scanner reads to decide what the image contains — which would then describe
+# the build tree rather than the runtime one.
+COPY package.json ./
 
 # Ownership proof for the MCP Registry: must match server.json's name exactly.
 LABEL io.modelcontextprotocol.server.name="io.github.ni-c/audiobookshelf-mcp"

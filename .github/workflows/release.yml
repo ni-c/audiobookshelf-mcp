@@ -17,7 +17,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: nothing in this tree declares an install hook
+      # (`npm query ':attr(scripts,[postinstall])'` and its install/preinstall
+      # siblings are all empty), so running them buys nothing — and the job
+      # below holds an OIDC token while they would run.
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run build
       - run: npm run test:coverage
@@ -44,7 +48,11 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $pkg" >&2
             exit 1
           fi
-      - run: npm ci
+      # --ignore-scripts, and here it is not a precaution but the point: this
+      # job holds `id-token: write` for npm Trusted Publishing, so every
+      # dependency's install hook would run with a live OIDC token available
+      # to it.
+      - run: npm ci --ignore-scripts
       # --provenance requires a PUBLIC repository.
       - run: npm publish --provenance
 
@@ -87,8 +95,21 @@ jobs:
           echo "Image tag $version never appeared on GHCR — is ci.yml's publish job green?" >&2
           exit 1
       - name: Install mcp-publisher
+        # Pinned to a release and its published checksum, not `latest`: this
+        # job holds an OIDC token, and `latest` runs whatever the upstream
+        # serves that day. Bump the version and the checksum together.
+        env:
+          PUBLISHER_VERSION: '1.8.1'
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/v${PUBLISHER_VERSION}"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          # Saved under its published name: the checksum line names that file.
+          curl -fsSL -o "$archive" "${base}/${archive}"
+          curl -fsSL -o checksums.txt "${base}/registry_${PUBLISHER_VERSION}_checksums.txt"
+          grep " ${archive}\$" checksums.txt | sha256sum -c -
+          tar xzf "$archive" mcp-publisher
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
 
@@ -114,5 +135,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md
