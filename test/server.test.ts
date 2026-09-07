@@ -215,7 +215,7 @@ describe('server', () => {
         return properties?.untrusted === undefined;
       })
       .map((tool) => tool.name)
-      .sort();
+      .toSorted();
     // The ones whose answer is this server's own: an id it was given, the
     // account it authenticates as, counters the instance keeps about itself.
     expect(plainTools).toEqual(
@@ -230,7 +230,7 @@ describe('server', () => {
         'get_media_progress',
         'get_server_status',
         'list_libraries',
-      ].sort()
+      ].toSorted()
     );
   });
 
@@ -303,7 +303,7 @@ describe('server', () => {
     const guarded = tools
       .filter((tool) => 'confirm_token' in (tool.inputSchema.properties ?? {}))
       .map((tool) => tool.name)
-      .sort();
+      .toSorted();
     expect(guarded).toEqual([
       'delete_bookmark',
       'delete_collection',

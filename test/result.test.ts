@@ -60,17 +60,17 @@ describe('result helpers', () => {
   });
 });
 
-describe('the result budget', () => {
-  /** A record roughly the size of one shaped library item. */
-  function item(index: number): Record<string, unknown> {
-    return {
-      id: `li_${index}`,
-      title: 'A book with a reasonably long title '.repeat(4),
-      authors: ['An Author Name'],
-      description: 'A description of the book. '.repeat(20),
-    };
-  }
+/** A record roughly the size of one shaped library item. */
+function item(index: number): Record<string, unknown> {
+  return {
+    id: `li_${index}`,
+    title: 'A book with a reasonably long title '.repeat(4),
+    authors: ['An Author Name'],
+    description: 'A description of the book. '.repeat(20),
+  };
+}
 
+describe('the result budget', () => {
   it('drops whole entries rather than characters, and says so', () => {
     // Seven of the fourteen listing tools have no `limit` at all —
     // Audiobookshelf does not paginate /api/collections or /api/playlists —

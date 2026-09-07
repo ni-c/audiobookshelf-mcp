@@ -349,7 +349,7 @@ export function compactListeningStats(value: unknown): Record<string, unknown> {
 
   const dayEntries = Object.entries(days)
     .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
-    .sort(([a], [b]) => b.localeCompare(a));
+    .toSorted(([a], [b]) => b.localeCompare(a));
 
   const topItems = Object.values(items)
     .map((entry) => {
@@ -360,7 +360,7 @@ export function compactListeningStats(value: unknown): Record<string, unknown> {
         timeListeningSeconds: num(item.timeListening) ?? 0,
       };
     })
-    .sort((a, b) => b.timeListeningSeconds - a.timeListeningSeconds)
+    .toSorted((a, b) => b.timeListeningSeconds - a.timeListeningSeconds)
     .slice(0, TOP_ITEMS);
 
   return defined({

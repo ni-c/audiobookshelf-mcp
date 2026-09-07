@@ -45,7 +45,7 @@ function longestArrayKey(record: Record<string, unknown>): string | undefined {
       (entry): entry is [string, unknown[]] =>
         Array.isArray(entry[1]) && entry[1].length > 1
     )
-    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+    .toSorted((a, b) => b[1].length - a[1].length)[0]?.[0];
 }
 
 /** The longest string field of a record beyond `floor` characters, or none. */
@@ -58,7 +58,7 @@ function longestStringKey(
       (entry): entry is [string, string] =>
         typeof entry[1] === 'string' && entry[1].length > floor
     )
-    .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+    .toSorted((a, b) => b[1].length - a[1].length)[0]?.[0];
 }
 
 /**
