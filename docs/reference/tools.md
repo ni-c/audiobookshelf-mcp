@@ -26,7 +26,9 @@ client may ignore; the dialog is enforced here and cannot be.
 Every tool declares an `outputSchema` and answers with `structuredContent` beside
 the text block, so a client can use a result without parsing prose. The tools
 that report library metadata carry `untrusted: true` and
-`source: "audiobookshelf"` as fields of that object. The documents are described
+`source: "audiobookshelf"` as fields of that object; so do the two that report
+an account's own data, because a bookmark title and a library's longest item
+are text somebody else wrote. The documents are described
 as open objects with the top-level keys this server builds: `detail: "full"`
 hands the API record back whole, so a strict shape would turn that mode into a
 failed call.

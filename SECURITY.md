@@ -62,22 +62,55 @@ when the API key would permit them.
 Both confirmation paths bind an answer to **one operation with one set of
 arguments**: the two-call `confirm_token` through a one-use entry in the store,
 the elicitation reply through a sealed (HMAC) `requestState` carrying the resource
-key. Neither proves that the answer is _recent_. A sealed state that opens onto an
-operation opens onto it whenever it is replayed.
+key.
 
-No replay defence is built, because in this deployment shape there is nothing to
-replay:
+The resource key covers every argument the dialog names. Where a tool writes
+several things at once — `update_collection` and `update_playlist` can reorder a
+list and rename the thing in the same call — the name and the description are
+part of the key too, so an approval given for one name cannot be redeemed with
+another. Approvals over sets of ids (the removals, the deletions) are keyed as
+sets, where order is not part of the meaning; approvals whose meaning is an
+order are keyed by position.
 
-- The sealing key is 32 random bytes per process, and this is a stdio server
-  spawned per session, so a state sealed in one session cannot be opened in the
-  next.
-- `requestState` only crosses the wire on protocol revision `2026-07-28`. This
-  server does not set `supportedProtocolVersions`, so it takes the SDK's default
-  list, which ends at `2025-11-25`; on that revision the SDK bridges the
-  elicitation server-side and the value never leaves the process.
-- The `confirm_token` path is single-use and expires after five minutes.
+**Replay.** A seal proves that an answer belongs to the question it was given,
+and not that it is recent. `serveStdio` negotiates protocol revision
+`2026-07-28`, where the sealed `requestState` travels out through the client and
+comes back with the answer — so a state that opens onto an operation would open
+onto it again for as long as it lives. `mcp-approval` 0.8.1 and later put a
+nonce in the state and spend it on the first answer, accepted or declined, which
+closes that. Two limits worth stating plainly: the record of spent states is
+per process, so a restart forgets it, and the sealing key is 32 random bytes per
+process, so a state sealed in one session cannot be opened in the next anyway.
+The `confirm_token` path is single-use and expires after five minutes.
 
-If any of those changes — a negotiated `2026-07-28`, or two processes serving the
-two halves of one flow with a shared key — a nonce becomes necessary. The
-approvals worth stealing here are `delete_collection`, `delete_playlist` and
-`delete_media_progress`.
+**What a removal can reach.** Audiobookshelf deletes a playlist outright once
+its last entry is removed, so `remove_items_from_playlist` can delete one.
+It reads the playlist before it asks, says so in the dialog when the removal
+takes the last entry, and refuses outright on a server started without
+`delete_playlist` — an operator who takes the delete tool away does not get the
+deletion back under another name.
+
+## What is removed from an answer
+
+Everything the API returns passes through one cleaner on its way out:
+
+- **Control characters** (C0 and C1 except tab, newline and carriage return, and
+  DEL) are stripped from every string and every key, in both the text block and
+  `structuredContent`. An escape sequence in a book title is a way to draw on
+  the terminal of whoever reads the tool result. Bidirectional marks and joiners
+  are kept — they are content in a title written in Arabic or Hebrew.
+- **Credentials in URLs.** A private podcast feed is published as
+  `https://user:token@host/feed.rss`, Audiobookshelf stores it as given, and
+  `get_library_item` hands it back. The userinfo is replaced.
+- **Credential fields.** `GET /api/me` answers with the account's old
+  non-expiring access token in a `token` field — for the root account included,
+  because the server calls its own serializer without `hideRootToken`. Any field
+  whose name ends in `token`, `password`, `secret`, `apikey`, `passphrase`,
+  `pash` or `privatekey` is replaced before the answer leaves, at any depth, and
+  the result names the fields that were removed rather than dropping them
+  silently.
+
+The API key itself is checked for shape at startup and again before every
+request: a value with a line break in it — a credential pasted across two lines
+— is refused here rather than by the HTTP layer, whose own error message quotes
+the value it refused.
