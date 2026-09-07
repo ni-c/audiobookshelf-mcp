@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { loadConfig, missingConfigKeys } from '../src/config.js';
 
+/**
+ * A key that satisfies the startup shape check.
+ *
+ * The single letter this used to be is now refused: a value of fewer than
+ * eight printable ASCII characters is not an Audiobookshelf API key, and the
+ * check that says so is the one keeping a wrapped paste out of undici's error
+ * message. Spelled so it cannot be mistaken for a real one, and so a test that
+ * asserts on absence has something distinctive to look for.
+ */
+const TEST_KEY = 'test-api-key-not-a-real-one';
+
 function env(values: Record<string, string>): NodeJS.ProcessEnv {
   return { ...values } as NodeJS.ProcessEnv;
 }
@@ -9,7 +20,7 @@ function env(values: Record<string, string>): NodeJS.ProcessEnv {
 describe('ELICITATION', () => {
   const base = {
     AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-    AUDIOBOOKSHELF_API_KEY: 'secret',
+    AUDIOBOOKSHELF_API_KEY: TEST_KEY,
   };
 
   it('defaults to on, and to on for an empty value', () => {
@@ -80,10 +91,10 @@ describe('loadConfig', () => {
   it('deletes the API key from the environment after reading it', () => {
     const e = env({
       AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-      AUDIOBOOKSHELF_API_KEY: 'secret',
+      AUDIOBOOKSHELF_API_KEY: TEST_KEY,
     });
     const config = loadConfig(e);
-    expect(config.apiKey).toBe('secret');
+    expect(config.apiKey).toBe(TEST_KEY);
     expect(e.AUDIOBOOKSHELF_API_KEY).toBeUndefined();
   });
 
@@ -95,20 +106,93 @@ describe('loadConfig', () => {
     // misconfiguration, and it is exactly the state in which someone reaches for
     // an inspector.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const e = env({ AUDIOBOOKSHELF_API_KEY: 'secret' });
+    const e = env({ AUDIOBOOKSHELF_API_KEY: TEST_KEY });
     const config = loadConfig(e);
     expect(e.AUDIOBOOKSHELF_API_KEY).toBeUndefined();
     // Still handed to the caller — the server starts, it just cannot call out.
-    expect(config.apiKey).toBe('secret');
+    expect(config.apiKey).toBe(TEST_KEY);
     expect(config.url).toBeUndefined();
     spy.mockRestore();
+  });
+
+  it.each([
+    ['a key with a line break in the middle', `eyJhbGciOi\nSECRET-TAIL`],
+    ['a key with a tab', `eyJhbGciOi\tSECRET-TAIL`],
+    ['a key with a space', 'eyJhbGciOi SECRET-TAIL'],
+    ['a key that is too short', 'abc'],
+    [
+      'a key with a control character',
+      `eyJhbGciOi${String.fromCharCode(0)}SECRET-TAIL`,
+    ],
+  ])('refuses %s without printing it', (_label, key) => {
+    // undici refuses a header value carrying one of these with
+    // `Headers.append: "<value>" is an invalid header value.` — the whole
+    // value — and that TypeError becomes a tool result. A key pasted across
+    // two lines is the ordinary way to arrive here, so the process refuses to
+    // start instead of failing later with the credential in the message.
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    expect(() =>
+      loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+          AUDIOBOOKSHELF_API_KEY: key,
+        })
+      )
+    ).toThrow('exit');
+    expect(exit).toHaveBeenCalledWith(1);
+    const message = error.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(message).toContain('AUDIOBOOKSHELF_API_KEY');
+    expect(message).toContain('characters long');
+    expect(message).not.toContain('SECRET-TAIL');
+    expect(message).not.toContain('eyJhbGciOi');
+    vi.restoreAllMocks();
+  });
+
+  it('accepts a key with a trailing newline from $(cat key)', () => {
+    // `AUDIOBOOKSHELF_API_KEY=$(cat key)` leaves one, and it is not a mistake
+    // worth refusing a start over — the Headers constructor would strip it
+    // anyway. An *inner* line break is the one that matters.
+    const config = loadConfig(
+      env({
+        AUDIOBOOKSHELF_URL: 'https://abs.example.com',
+        AUDIOBOOKSHELF_API_KEY: `${TEST_KEY}\n`,
+      })
+    );
+    expect(config.apiKey).toBe(TEST_KEY);
+  });
+
+  it('does not print the scheme of a URL that is really a pasted key', () => {
+    // A 56-character hexadecimal key with a colon after it is a valid URL
+    // whose scheme is the key, so `(got ${parsed.protocol})` printed the
+    // credential in full.
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    const pastedKey = 'a'.repeat(56);
+    expect(() =>
+      loadConfig(
+        env({
+          AUDIOBOOKSHELF_URL: `${pastedKey}://x`,
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
+        })
+      )
+    ).toThrow('exit');
+    const message = error.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(message).toContain('http://');
+    expect(message).not.toContain(pastedKey);
+    expect(message).toContain('56-character value');
+    vi.restoreAllMocks();
   });
 
   it('strips trailing slashes from the base URL', () => {
     const config = loadConfig(
       env({
         AUDIOBOOKSHELF_URL: 'https://abs.example.com//',
-        AUDIOBOOKSHELF_API_KEY: 'k',
+        AUDIOBOOKSHELF_API_KEY: TEST_KEY,
       })
     );
     expect(config.url).toBe('https://abs.example.com');
@@ -126,7 +210,7 @@ describe('loadConfig', () => {
     // Audiobookshelf's web UI answers that with 200 and HTML, and before the
     // content-type check in api.ts the tools reported empty libraries.
     const config = loadConfig(
-      env({ AUDIOBOOKSHELF_URL: raw, AUDIOBOOKSHELF_API_KEY: 'k' })
+      env({ AUDIOBOOKSHELF_URL: raw, AUDIOBOOKSHELF_API_KEY: TEST_KEY })
     );
     expect(config.url).toBe(expected);
   });
@@ -139,7 +223,7 @@ describe('loadConfig', () => {
       const config = loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
           AUDIOBOOKSHELF_READ_ONLY: value,
         })
       );
@@ -153,7 +237,7 @@ describe('loadConfig', () => {
       const config = loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
           AUDIOBOOKSHELF_READ_ONLY: value,
         })
       );
@@ -169,7 +253,7 @@ describe('loadConfig', () => {
       const config = loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
           AUDIOBOOKSHELF_INSECURE_TLS: value,
         })
       );
@@ -186,7 +270,7 @@ describe('loadConfig', () => {
       loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'https://user:pw@abs.example.com',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
         })
       )
     ).toThrow('exit');
@@ -203,7 +287,7 @@ describe('loadConfig', () => {
       loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'file:///etc/passwd',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
         })
       )
     ).toThrow('exit');
@@ -216,7 +300,7 @@ describe('loadConfig', () => {
     const config = loadConfig(
       env({
         AUDIOBOOKSHELF_URL: 'http://abs.example.com',
-        AUDIOBOOKSHELF_API_KEY: 'k',
+        AUDIOBOOKSHELF_API_KEY: TEST_KEY,
       })
     );
     expect(config.url).toBe('http://abs.example.com');
@@ -229,7 +313,7 @@ describe('loadConfig', () => {
     loadConfig(
       env({
         AUDIOBOOKSHELF_URL: 'http://localhost:13378',
-        AUDIOBOOKSHELF_API_KEY: 'k',
+        AUDIOBOOKSHELF_API_KEY: TEST_KEY,
       })
     );
     expect(spy.mock.calls.flat().join(' ')).not.toMatch(/unencrypted/);
@@ -245,7 +329,9 @@ describe('loadConfig', () => {
       'http://127.0.0.1:13378',
       'http://abs.localhost:13378',
     ]) {
-      loadConfig(env({ AUDIOBOOKSHELF_URL: url, AUDIOBOOKSHELF_API_KEY: 'k' }));
+      loadConfig(
+        env({ AUDIOBOOKSHELF_URL: url, AUDIOBOOKSHELF_API_KEY: TEST_KEY })
+      );
       expect(spy.mock.calls.flat().join(' '), url).not.toMatch(/unencrypted/);
     }
     spy.mockRestore();
@@ -255,7 +341,7 @@ describe('loadConfig', () => {
     const config = loadConfig(
       env({
         AUDIOBOOKSHELF_URL: 'https://abs.example.com',
-        AUDIOBOOKSHELF_API_KEY: 'k',
+        AUDIOBOOKSHELF_API_KEY: TEST_KEY,
         AUDIOBOOKSHELF_READ_ONLY: 'true',
         AUDIOBOOKSHELF_INSECURE_TLS: 'true',
       })
@@ -276,7 +362,7 @@ describe('loadConfig URL validation', () => {
       loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'not a url at all',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
         })
       )
     ).toThrow('exit');
@@ -299,7 +385,7 @@ describe('loadConfig URL validation', () => {
       loadConfig(
         env({
           AUDIOBOOKSHELF_URL: 'abs_secret_pasted_into_the_wrong_variable',
-          AUDIOBOOKSHELF_API_KEY: 'k',
+          AUDIOBOOKSHELF_API_KEY: TEST_KEY,
         })
       )
     ).toThrow('exit');

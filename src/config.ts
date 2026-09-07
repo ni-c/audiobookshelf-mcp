@@ -65,12 +65,44 @@ export function parseElicitation(raw: string | undefined): boolean {
   const value = raw?.trim().toLowerCase();
   if (value === undefined || value === '' || value === 'true') return true;
   if (value === 'false') return false;
+  // Described, not quoted. ELICITATION is unprefixed and sits in the same
+  // block of a compose file as AUDIOBOOKSHELF_API_KEY, so the value that lands
+  // here wrong is a candidate for being the credential from the line above —
+  // and this message goes to stderr, which is the MCP client's log.
   console.error(
-    `audiobookshelf-mcp: ELICITATION must be "true" or "false" — got "${raw}". ` +
-      'Refusing to start rather than guess.'
+    'audiobookshelf-mcp: ELICITATION must be "true" or "false" — got ' +
+      `${describeValue(raw)}. Refusing to start rather than guess.`
   );
   process.exit(1);
 }
+
+/**
+ * A configuration value named by shape and length rather than quoted.
+ *
+ * Every diagnostic in this file fires precisely when a variable does not hold
+ * what was expected, which is exactly the state a credential pasted into the
+ * wrong line produces. Only a value that already looks like one of the words
+ * being asked for is safe to repeat back.
+ */
+function describeValue(raw: string | undefined): string {
+  if (raw === undefined) return 'nothing';
+  const trimmed = raw.trim();
+  if (trimmed === '') return 'an empty value';
+  if (/^[A-Za-z0-9_.-]{1,20}$/.test(trimmed)) return `"${trimmed}"`;
+  return `a ${trimmed.length}-character value`;
+}
+
+/**
+ * Shape of an Audiobookshelf API key, checked at startup.
+ *
+ * Not a format claim — the key is a JWT today and this server has no business
+ * pinning that. It is the one property the HTTP layer requires: printable
+ * ASCII, no line breaks. A key pasted with a wrapped newline inside it reaches
+ * undici, whose refusal quotes the value in full, and that TypeError becomes a
+ * tool result. Refusing here means the process never starts with a credential
+ * it cannot send.
+ */
+const API_KEY_SHAPE = /^[!-~]{8,4096}$/;
 
 /**
  * Reads the configuration from environment variables.
@@ -82,7 +114,10 @@ export function parseElicitation(raw: string | undefined): boolean {
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const url = env.AUDIOBOOKSHELF_URL;
-  const apiKey = env.AUDIOBOOKSHELF_API_KEY;
+  // Trimmed before anything else: `AUDIOBOOKSHELF_API_KEY=$(cat key)` leaves a
+  // trailing newline, which the Headers constructor strips and an inner one it
+  // does not.
+  const apiKey = env.AUDIOBOOKSHELF_API_KEY?.trim();
   const insecureTls = env.AUDIOBOOKSHELF_INSECURE_TLS === 'true';
   // Deliberately more forgiving than `AUDIOBOOKSHELF_INSECURE_TLS` above, and
   // the asymmetry is the safety argument rather than an oversight: a misspelt
@@ -104,8 +139,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // reads the locals above, never `env` again.
   delete env.AUDIOBOOKSHELF_API_KEY;
 
-  // After the delete, deliberately: this one can exit the process, and an exit
+  // After the delete, deliberately: these can exit the process, and an exit
   // above would leave the key in the environment for whatever runs next.
+  if (apiKey !== undefined && apiKey !== '' && !API_KEY_SHAPE.test(apiKey)) {
+    // Never the value, and never the position of the offending character
+    // either — the length is what tells a wrapped paste from a truncated
+    // one, and that is all somebody needs to look at the right line.
+    console.error(
+      'audiobookshelf-mcp: AUDIOBOOKSHELF_API_KEY does not have the shape of ' +
+        'an API key: it must be 8 to 4096 printable ASCII characters with no ' +
+        'spaces, line breaks or control characters. The value read was ' +
+        `${apiKey.length} characters long. It is not shown. Create the key ` +
+        'under Settings \u2192 Users \u2192 API Keys and paste it as one line.'
+    );
+    process.exit(1);
+  }
+
   const elicitation = parseElicitation(env.ELICITATION);
 
   const missing = [
@@ -143,8 +192,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     process.exit(1);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    // The scheme is not printed. A 56-character hexadecimal key with a colon
+    // after it is a valid URL whose scheme is the key, so this branch is one
+    // of the two a pasted credential reaches — and the other one below
+    // already refuses to echo.
     console.error(
-      `audiobookshelf-mcp: AUDIOBOOKSHELF_URL must use http:// or https:// (got ${parsed.protocol})`
+      'audiobookshelf-mcp: AUDIOBOOKSHELF_URL must use http:// or https:// ' +
+        `— the value read uses neither (${describeValue(parsed.protocol.replace(/:$/, ''))} ` +
+        'as its scheme).'
     );
     process.exit(1);
   }
@@ -170,7 +225,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // the web UI answers 200 with HTML. Before the content-type check in
     // `api.ts` that showed up as empty libraries rather than as an error.
     // A query string goes the same way, one `?` earlier.
-    url: `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, ''),
+    url: withoutTrailingSlashes(`${parsed.origin}${parsed.pathname}`),
     apiKey,
     insecureTls,
     readOnly,
@@ -178,6 +233,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowTools,
     denyTools,
   };
+}
+
+/**
+ * Drops the trailing slashes of the base URL, in one pass.
+ *
+ * `replace(/\/+$/, '')` looks like the obvious way and is quadratic: the
+ * pattern is tried from every position of the run, and consumes the run each
+ * time. An operator URL ending in eighty thousand slashes followed by one more
+ * character cost 1.7 seconds at startup. Walking an index backwards and
+ * slicing once is linear, and this is a base URL — the length is whatever was
+ * pasted.
+ */
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end--;
+  return end === value.length ? value : value.slice(0, end);
 }
 
 function isLoopbackHost(hostname: string): boolean {
