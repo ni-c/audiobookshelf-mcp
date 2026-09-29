@@ -31,6 +31,16 @@ function byteLength(text: string): number {
   return Buffer.byteLength(text, 'utf8');
 }
 
+/** Bytes of a value as a slot estimate sees it: compact JSON. */
+function compactSize(value: unknown): number {
+  return byteLength(JSON.stringify(value) ?? '');
+}
+
+/** Bytes of a document as the tool result renders it: indented JSON. */
+function renderedSize(value: Record<string, unknown>): number {
+  return byteLength(JSON.stringify(value, null, 2));
+}
+
 export function textResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
@@ -115,9 +125,6 @@ function collectSlots(data: Record<string, unknown>): Slot[] {
   const slots: Slot[] = [];
   let nodes = 0;
 
-  const size = (value: unknown): number =>
-    byteLength(JSON.stringify(value) ?? '');
-
   const walk = (
     value: unknown,
     container: Record<string, unknown> | unknown[],
@@ -133,7 +140,7 @@ function collectSlots(data: Record<string, unknown>): Slot[] {
           key,
           path,
           kind: 'string',
-          bytes: size(value),
+          bytes: compactSize(value),
         });
       }
       return;
@@ -142,7 +149,13 @@ function collectSlots(data: Record<string, unknown>): Slot[] {
       // An array of one cannot be halved into anything but nothing, so it is
       // not a slot — but what is inside it still can be.
       if (value.length > 1) {
-        slots.push({ container, key, path, kind: 'array', bytes: size(value) });
+        slots.push({
+          container,
+          key,
+          path,
+          kind: 'array',
+          bytes: compactSize(value),
+        });
         return;
       }
       for (const [index, entry] of value.entries()) {
@@ -225,8 +238,6 @@ export function budget(data: unknown): Record<string, unknown> {
     },
     ...copy,
   });
-  const size = (value: Record<string, unknown>): number =>
-    byteLength(JSON.stringify(value, null, 2));
 
   // Slots already shortened, remembered by identity rather than by looking at
   // the value. A text field whose own content ends in the note this pass
@@ -249,7 +260,7 @@ export function budget(data: unknown): Record<string, unknown> {
   // the largest slots first until the estimate covers the overshoot, and
   // measures once.
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const current = size(withNote());
+    const current = renderedSize(withNote());
     if (current <= MAX_RESULT_BYTES) return withNote();
 
     const slots = collectSlots(copy);
@@ -301,7 +312,7 @@ export function budget(data: unknown): Record<string, unknown> {
     if (!cut) break;
   }
 
-  const final = size(withNote());
+  const final = renderedSize(withNote());
   if (final <= MAX_RESULT_BYTES) return withNote();
 
   // An error rather than an envelope saying so: the envelope is a different
