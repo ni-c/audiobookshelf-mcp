@@ -90,10 +90,13 @@ function looksLikeUrl(value: string): boolean {
 /**
  * {@link cleanText} over a whole structure, with URL redaction on the way.
  *
- * Rebuilds every object with `Object.fromEntries`, so a key of `__proto__` —
- * an own property after `JSON.parse`, and legal JSON from any backend — stays
- * an own property of the copy instead of becoming its prototype. Keys are
- * cleaned as well as values: a key is text a model reads too.
+ * Keys are cleaned as well as values: a key is text a model reads too. A key
+ * that cleans to `__proto__` — an own property after `JSON.parse`, and legal
+ * JSON from any backend — is dropped, at every depth. Kept, it reached the text
+ * block but not `structuredContent`: a client parses that against the output
+ * schema, and zod assigns fields, which on that name sets a prototype instead.
+ * The two channels then disagreed about the same answer. The cleaned name is
+ * the one checked, so a control character inside the name cannot hide it.
  *
  * Numbers, booleans and null pass through. `undefined` and functions cannot
  * come out of JSON; they are dropped from objects, where `JSON.stringify`
@@ -115,10 +118,11 @@ export function cleanValue(value: unknown): unknown {
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).flatMap(
-        ([key, entry]) =>
-          entry === undefined || typeof entry === 'function'
-            ? []
-            : [[cleanText(key), cleanValue(entry)]]
+        ([key, entry]) => {
+          if (entry === undefined || typeof entry === 'function') return [];
+          const name = cleanText(key);
+          return name === '__proto__' ? [] : [[name, cleanValue(entry)]];
+        }
       )
     );
   }
@@ -267,7 +271,12 @@ export function redactCredentials(
         return [key, redactCredentials(entry, report, here).value];
       }
     );
-    return { value: Object.fromEntries(entries), report };
+    // A `__proto__` key is dropped, as in `cleanValue`: a client's schema parse
+    // loses it from `structuredContent` only, and the two channels must agree.
+    return {
+      value: Object.fromEntries(entries.filter(([key]) => key !== '__proto__')),
+      report,
+    };
   }
   return { value, report };
 }

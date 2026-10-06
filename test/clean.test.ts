@@ -121,16 +121,29 @@ describe('cleanValue', () => {
     expect(value.description).toContain('post@example.com');
   });
 
-  it('keeps a __proto__ key as an own property', () => {
-    // An own property after JSON.parse, and legal JSON from any backend. A
-    // walker that rebuilds objects with `out[key] = …` loses it silently.
+  it('drops a __proto__ key at every depth and nothing else', () => {
+    // An own property after JSON.parse, and legal JSON from any backend. Kept,
+    // it reaches the text block but not structuredContent.
     const parsed = JSON.parse(
-      '{"__proto__": {"polluted": true}, "a": 1}'
+      '{"__proto__": {"polluted": true}, "a": 1, "list": [{"__proto__": 1, "b": 2}],' +
+        ' "deep": {"x": {"__proto__": null, "c": 3}}, "__pro\\u0000to__": 4, "n": {"__proto__": null}}'
     ) as Record<string, unknown>;
     const cleaned = cleanValue(parsed) as Record<string, unknown>;
-    expect(Object.hasOwn(cleaned, '__proto__')).toBe(true);
+    expect(cleaned).toEqual({
+      a: 1,
+      list: [{ b: 2 }],
+      deep: { x: { c: 3 } },
+      n: {},
+    });
+    expect(Object.hasOwn(cleaned, '__proto__')).toBe(false);
     expect(Object.getPrototypeOf(cleaned)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('turns {"__proto__": null} into an empty object', () => {
+    const cleaned = cleanValue(JSON.parse('{"__proto__": null}'));
+    expect(cleaned).toEqual({});
+    expect(Object.getPrototypeOf(cleaned)).toBe(Object.prototype);
   });
 
   it('cleans keys as well as values', () => {
@@ -240,6 +253,16 @@ describe('redactCredentials', () => {
     expect(JSON.stringify(value)).not.toContain('THE-ACCESS-TOKEN');
     expect(report.removed).toEqual(['token']);
     expect((value as { username: string }).username).toBe('willi');
+  });
+
+  it('drops a __proto__ key, so no path hands one to a result', () => {
+    const parsed = JSON.parse(
+      '{"__proto__": {"polluted": true}, "id": "u1", "list": [{"__proto__": null, "k": 1}]}'
+    );
+    const { value } = redactCredentials(parsed);
+    expect(value).toEqual({ id: 'u1', list: [{ k: 1 }] });
+    expect(Object.hasOwn(value as object, '__proto__')).toBe(false);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
   });
 
   it('reaches a credential nested in a list', () => {

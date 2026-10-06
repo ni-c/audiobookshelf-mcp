@@ -833,6 +833,40 @@ describe('projections in the read tools', () => {
     vi.restoreAllMocks();
   });
 
+  it('answers the same in both channels when upstream sends __proto__', async () => {
+    // Written as JSON text: an object literal would set a prototype instead.
+    const body = JSON.parse(
+      '[{"id": "recent-series", "label": "Recent Series", "type": "series", "__proto__": {"polluted": true},' +
+        ' "entities": [{"id": "ser_1", "name": "Ozean", "__proto__": {"polluted": true}, "extra": {"__proto__": null, "k": 1}}]}]'
+    ) as unknown;
+    mockFetch(body);
+    const result = await (
+      await connect()
+    ).callTool({
+      name: 'get_personalized_shelves',
+      arguments: { library_id: 'lib_1' },
+    });
+
+    const text = firstText(result);
+    expect(text).not.toContain('__proto__');
+    expect(
+      JSON.stringify(
+        (result as { structuredContent?: unknown }).structuredContent
+      )
+    ).not.toContain('__proto__');
+    // payload() asserts that structuredContent equals the parsed text.
+    const shelves = (
+      payload(result) as {
+        items: { entities: Record<string, unknown>[] }[];
+      }
+    ).items;
+    expect(shelves[0]!.entities[0]).toEqual({
+      id: 'ser_1',
+      name: 'Ozean',
+      extra: { k: 1 },
+    });
+  });
+
   it('shapes the personalized shelves and passes non-media entities through', async () => {
     mockFetch([
       {
