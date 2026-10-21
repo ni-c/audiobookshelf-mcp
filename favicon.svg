@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="audiobookshelf-mcp">
+  <rect width="32" height="32" rx="7" fill="#4f46e5" />
+  <!-- An open book: two pages meeting at a spine. -->
+  <path d="M16 9.5C13.8 8.1 11.4 7.6 8.5 7.6v14.2c2.9 0 5.3.5 7.5 1.9 2.2-1.4 4.6-1.9 7.5-1.9V7.6c-2.9 0-5.3.5-7.5 1.9z"
+        fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linejoin="round" />
+  <line x1="16" y1="9.5" x2="16" y2="23.7" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" />
+</svg>
