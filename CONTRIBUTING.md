@@ -80,7 +80,7 @@ hand-written and needs updating separately.
 ## Expectations
 
 - **Tests.** Behaviour changes come with a test that fails without the change.
-  CI runs lint, build and tests on Node 22 and 24, coverage with thresholds, an npm
+  CI runs lint, build and tests on Node 24 and 26, coverage with thresholds, an npm
   audit, CodeQL, and a Trivy scan of the image on amd64 and arm64.
 - **Comments** explain constraints the code cannot show — not what the next line does.
   Much of this codebase exists because the Audiobookshelf API is surprising in

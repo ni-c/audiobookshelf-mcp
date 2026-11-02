@@ -58,7 +58,7 @@ single-use token bound to the exact targets where the client cannot show one.
 
 ## Requirements
 
-- Node.js 22 or newer
+- Node.js 24 or newer
 - Audiobookshelf **2.26.0 or newer** — earlier versions have no API keys
 - An Audiobookshelf API key
 

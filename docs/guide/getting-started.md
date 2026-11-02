@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Node.js 22 or newer** (or Docker)
+- **Node.js 24 or newer** (or Docker)
 - **Audiobookshelf 2.26.0 or newer** — earlier versions have no API keys
 - An Audiobookshelf **API key**
 
