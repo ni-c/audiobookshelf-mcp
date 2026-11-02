@@ -4,5 +4,5 @@
     "MCP server for Audiobookshelf — browse your library,",
     "track progress, and keep collections in order."
   ],
-  "badges": ["44 tools", "MIT", "Node ≥22"]
+  "badges": ["44 tools", "MIT"]
 }
